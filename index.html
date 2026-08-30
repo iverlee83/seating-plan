@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seating Plan Generator</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1c2430; --muted:#6b7684;
+    --line:#dfe3e8; --accent:#1f4e79; --accent-soft:#e8f0f8; --chip:#eef3f8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       color:var(--ink);background:var(--bg)}
+  header{background:var(--accent);color:#fff;padding:10px 18px;display:flex;
+         align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  .acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  button,select{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);
+         padding:6px 11px;border-radius:7px;cursor:pointer}
+  button:hover{background:#f0f3f6}
+  button.primary{background:#fff;color:var(--accent);border-color:#fff;font-weight:600}
+  button.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
+  button.ghost:hover{background:rgba(255,255,255,.15)}
+  select.ghost{background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.5)}
+  select.ghost option{color:var(--ink)}
+  .modes{display:inline-flex;border:1px solid rgba(255,255,255,.5);border-radius:7px;overflow:hidden}
+  .modes button{border:none;border-radius:0;background:transparent;color:#fff;padding:6px 13px}
+  .modes button.on{background:#fff;color:var(--accent);font-weight:600}
+
+  .app{display:flex;align-items:flex-start;gap:16px;padding:16px;max-width:1600px;margin:0 auto}
+  .panel{width:300px;flex:0 0 300px;background:var(--panel);border:1px solid var(--line);
+         border-radius:10px;padding:15px;position:sticky;top:12px;
+         max-height:calc(100vh - 90px);overflow-y:auto}
+  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin:0 0 8px}
+  .panel h2:not(:first-child){margin-top:18px}
+  label{display:block;font-size:12px;color:var(--muted);margin:9px 0 4px}
+  input[type=text],input[type=number],textarea{width:100%;padding:6px 9px;border:1px solid var(--line);
+    border-radius:6px;font:inherit;background:#fff;color:var(--ink)}
+  input[type=range]{width:100%}
+  textarea{min-height:110px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .row2{display:flex;gap:9px}.row2>div{flex:1}
+  .hint{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.4}
+  .check{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:13px}
+  .check input{width:auto;margin:0}
+  .check label{margin:0;color:var(--ink);font-size:13px}
+  .wide{width:100%;margin-top:12px;background:var(--accent);color:#fff;border-color:var(--accent);
+        font-weight:600;padding:9px}
+  .wide:hover{background:#17395a}
+  .filebtn{display:block;width:100%;text-align:center;margin-top:8px;padding:8px;border:1px dashed var(--line);
+           border-radius:7px;color:var(--accent);font-size:13px;cursor:pointer;background:#fbfcfd}
+  .filebtn:hover{background:var(--accent-soft)}
+  #fileInfo{font-size:11px;margin-top:6px}
+
+  .rosterbox{border:1px solid var(--accent-soft);background:#fbfdff;border-radius:9px;padding:10px;
+             margin:-4px 0 4px}
+  #roster{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-height:44px;max-height:190px;overflow-y:auto;
+          border:1px dashed var(--line);border-radius:8px;padding:8px;background:#fff}
+  #roster.over{border-color:var(--accent);background:var(--accent-soft)}
+  .chip{display:inline-flex;gap:5px;background:var(--chip);border:1px solid #cfdcea;
+        border-radius:20px;padding:3px 10px;font-size:12px;cursor:grab}
+  .chip b{color:var(--accent)}
+  .chip.dragging{opacity:.4}
+
+  main{flex:1;min-width:0}
+  .roomwrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .title{text-align:center;font-size:18px;font-weight:600;margin-bottom:10px}
+  .viewnote{text-align:center;font-size:11px;color:var(--muted);margin-top:10px}
+
+  .room{position:relative;width:100%;aspect-ratio:3/2;background:#fdfdfb;
+        border:1px solid var(--line);border-radius:8px;overflow:hidden;
+        container-type:size;user-select:none;-webkit-user-select:none;touch-action:none}
+  .room.grid{background-image:linear-gradient(to right,rgba(31,78,121,.07) 1px,transparent 1px),
+                              linear-gradient(to bottom,rgba(31,78,121,.07) 1px,transparent 1px);
+             background-size:1.6667% 2.5%}
+  .board{position:absolute;left:4%;top:1.6%;width:92%;height:5.2%;background:var(--accent);color:#fff;
+         display:flex;align-items:center;justify-content:center;border-radius:4px;
+         font-size:1.05cqw;letter-spacing:.22em;text-transform:uppercase;
+         -webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+  .desk{position:absolute;border:1.5px solid #c3ccd6;border-radius:5px;background:#fff;
+        display:flex;align-items:center;justify-content:center;text-align:center;
+        overflow:hidden;line-height:1.1;padding:.08em .12em .5em}
+  /* name is the main label; class number follows it in smaller brackets */
+  .desk .nm{font-size:1em;line-height:1.15;font-weight:600;color:var(--ink);display:block}
+  .desk .nml{display:block;white-space:nowrap}
+  .desk .no{font-size:.72em;font-weight:700;color:var(--accent);white-space:nowrap}
+  .desk .numonly{font-size:1.25em;font-weight:700;color:var(--accent);display:block}
+  .desk .chair{position:absolute;left:24%;right:24%;bottom:2%;height:8%;background:#b9c4d0;border-radius:2px}
+  .desk.empty{background:#f7f8fa;border-style:dashed}
+  .desk.empty .numonly{color:#aab3bd;font-size:.6em;font-weight:500}
+  .desk.sel{outline:2px solid var(--accent);outline-offset:2px;box-shadow:0 2px 8px rgba(31,78,121,.25)}
+  .desk.over{outline:2px solid #16794a;outline-offset:2px}
+  .fix{position:absolute;border:1.5px solid #b9a68a;background:#f3ece0;border-radius:4px;
+       display:flex;align-items:center;justify-content:center;color:#7a6a52;
+       text-align:center;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .fix span{white-space:nowrap}
+  .fix.window{background:#e4f0f6;border-color:#9dbccd;color:#4d7387}
+  .fix.door{background:#f6e8e2;border-color:#cba793;color:#8a6350}
+  .fix.teacher{background:#eef3f8;border-color:#9fb4c8;color:#3d5a75;font-weight:600}
+  .arrange .desk,.arrange .fix{cursor:move}
+  .seatmode .desk{cursor:pointer}
+  .marquee{position:absolute;border:1px dashed var(--accent);background:rgba(31,78,121,.08);pointer-events:none}
+
+  footer{text-align:center;color:var(--muted);font-size:11px;padding:8px 0 22px}
+  #printImg{display:none}
+
+  @media print{
+    @page{size:A4 landscape;margin:9mm}
+    body{background:#fff}
+    header,.panel,footer,.noprint,.room{display:none !important}
+    .app{padding:0;display:block;max-width:none}
+    .roomwrap{border:none;padding:0}
+    .title{font-size:20pt;margin-bottom:6pt}
+    .viewnote{font-size:8pt;margin-top:6pt}
+    /* the plan prints as the same rendered image the PNG/Word exports use */
+    #printImg{display:block;width:100%;max-width:100%;max-height:168mm;
+              object-fit:contain;margin:0 auto}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v4</span></h1>
+  <div class="acts">
+    <span class="modes" id="modes">
+      <button data-mode="seat" class="on">Seat students</button>
+      <button data-mode="arrange">Arrange desks</button>
+    </span>
+    <select id="preset" class="ghost" title="Auto-arrange">
+      <option value="">Auto-arrange…</option>
+      <option value="pods">Group pods</option>
+      <option value="pairs">Pairs (2 desks joined)</option>
+      <option value="rows">Single rows (exam style)</option>
+      <option value="u">U-shape / horseshoe</option>
+    </select>
+    <select id="addItem" class="ghost" title="Add to room">
+      <option value="">Add to room…</option>
+      <option value="desk">Extra desk</option>
+      <option value="teacher">Teacher's desk</option>
+      <option value="door">Door</option>
+      <option value="window">Window</option>
+      <option value="cupboard">Cupboard</option>
+      <option value="label">Text label</option>
+    </select>
+    <button class="ghost" id="btnRotate" title="Rotate 45° (R)">Rotate ⟳</button>
+    <button class="ghost" id="btnDelete" title="Delete selected (⌫)">Delete</button>
+    <button class="ghost" id="btnNew" title="Clear the saved plan and start again">New plan</button>
+    <button class="ghost" id="btnRandom">Fill randomly</button>
+    <button class="ghost" id="btnShuffle">Shuffle all</button>
+    <button class="primary" id="btnPdf">PDF</button>
+    <button class="primary" id="btnWord">Word</button>
+    <button class="primary" id="btnPng">PNG</button>
+  </div>
+</header>
+
+<div class="app">
+  <aside class="panel noprint">
+    <div class="rosterbox">
+      <h2 style="margin-top:0">Unseated students <span id="rosterCount" style="color:var(--accent)"></span></h2>
+      <div class="hint" id="modeHint"></div>
+      <div id="noNames" style="display:none;font-size:12px;color:#8a5a12;background:#fdf3e2;
+           border:1px solid #edd6ab;border-radius:7px;padding:7px 9px;margin-top:8px">
+        No names loaded yet — paste or upload a class list below and the desks will fill in automatically.
+      </div>
+      <div id="roster"></div>
+    </div>
+
+    <h2>Class setup</h2>
+    <label for="className">Class / title</label>
+    <input type="text" id="className" value="Seating Plan">
+    <div class="row2">
+      <div><label for="numStudents">No. of students</label>
+        <input type="number" id="numStudents" min="1" max="60" value="30"></div>
+      <div><label for="groupSize">Per group</label>
+        <input type="number" id="groupSize" min="1" max="12" value="5"></div>
+    </div>
+    <div class="row2">
+      <div><label for="perRow">Groups / pairs per row</label>
+        <input type="number" id="perRow" min="1" max="8" value="3"></div>
+      <div><label for="startNo">First class no.</label>
+        <input type="number" id="startNo" min="1" max="60" value="1"></div>
+    </div>
+    <label for="seatStyle">Desk arrangement</label>
+    <select id="seatStyle" style="width:100%">
+      <option value="pods">Group pods</option>
+      <option value="pairs">Pairs — 2 desks joined</option>
+      <option value="rows">Single rows (exam style)</option>
+      <option value="u">U-shape / horseshoe</option>
+    </select>
+
+    <h2>Class list</h2>
+    <label for="upload" class="filebtn" id="uploadLabel">📄 Upload .xlsx or .csv class list</label>
+    <input type="file" id="upload" accept=".xlsx,.csv,.txt" style="display:none">
+    <div id="fileInfo" class="hint">Two columns: class number and name (a header row is detected automatically).</div>
+    <label for="names">…or type / paste the list</label>
+    <textarea id="names" placeholder="1 Chan Tai Man
+2 Wong Siu Ling
+3, Lee Ka Yan"></textarea>
+    <div class="hint">Space, comma, tab, full-stop or dash all work as separators. Leave empty to use class numbers only.</div>
+    <button class="wide" id="btnBuild">Build seating plan</button>
+    <div class="hint">Rebuilding replaces the desks. Room fixtures (door, window, teacher's desk) stay where you put them.</div>
+
+    <h2>Room &amp; display</h2>
+    <label for="deskSize">Desk size <span id="deskSizeVal" style="color:var(--accent)"></span></label>
+    <input type="range" id="deskSize" min="60" max="170" value="100">
+    <div class="check"><input type="checkbox" id="snap" checked><label for="snap">Snap to grid</label></div>
+    <div class="check"><input type="checkbox" id="mirror"><label for="mirror">Teacher's view (mirror)</label></div>
+    <div class="check"><input type="checkbox" id="showNames" checked><label for="showNames">Show names on desks</label></div>
+    <div class="check"><input type="checkbox" id="upright" checked><label for="upright">Keep text upright when rotated</label></div>
+    <div class="check"><input type="checkbox" id="colours" checked><label for="colours">Colour-code groups / pairs</label></div>
+    <div class="hint" id="savedNote" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"></div>
+  </aside>
+
+  <main>
+    <div class="roomwrap">
+      <div class="title" id="planTitle">Seating Plan</div>
+      <div class="room seatmode" id="room">
+        <div class="board" id="board">Front of classroom / whiteboard</div>
+      </div>
+      <img id="printImg" alt="">
+      <div class="viewnote" id="viewNote"></div>
+    </div>
+    <footer class="noprint">PDF opens the print dialog — choose “Save as PDF”, landscape. Keyboard: R rotate, Shift+R back, arrows nudge, ⌫ delete.</footer>
+  </main>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var RW=1200, RH=800, GRID=20;
+var GROUP_COLS=["#e8f0f8","#eaf5ec","#fdf1e3","#f3edfa","#fdeaea","#e9f6f8","#f7f3e4","#eef0f5"];
+var GROUP_BRD=["#a9c4dc","#a8ceb3","#e2c193","#c5b2df","#e6adad","#a5cbd6","#d5c99a","#b9c0cf"];
+
+var students=[], desks=[], fixtures=[], sel=[];
+var mode="seat", nextId=1, deskScale=1, printDirty=true;
+var $=function(i){ return document.getElementById(i); };
+var room=$("room");
+var useCq = window.CSS && CSS.supports && CSS.supports("font-size","1cqw");
+
+/* ================= students ================= */
+function parseNames(text){
+  var out=[], lines=text.split(/\r?\n/), auto=1;
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i].trim(); if(!line) continue;
+    var m=line.match(/^(\d{1,3})\s*[\.,\)\-\t:]?\s*(.*)$/), no, name;
+    if(m && (m[2].length || /^\d{1,3}$/.test(line))){ no=parseInt(m[1],10); name=m[2].trim(); }
+    else { no=auto; name=line; }
+    auto=no+1; out.push({no:no,name:name});
+  }
+  return out;
+}
+function buildStudents(){
+  var listed=parseNames($("names").value);
+  var n=parseInt($("numStudents").value,10)||30;
+  var start=parseInt($("startNo").value,10)||1;
+  if(listed.length){ n=listed.length; $("numStudents").value=n; }
+  var arr=[];
+  for(var i=0;i<n;i++){
+    if(i<listed.length) arr.push({id:"s"+i,no:listed[i].no,name:listed[i].name});
+    else arr.push({id:"s"+i,no:start+i,name:""});
+  }
+  return arr;
+}
+function studentById(id){ for(var i=0;i<students.length;i++) if(students[i].id===id) return students[i]; return null; }
+function deskById(id){ for(var i=0;i<desks.length;i++) if(desks[i].id===id) return desks[i]; return null; }
+function fixById(id){ for(var i=0;i<fixtures.length;i++) if(fixtures[i].id===id) return fixtures[i]; return null; }
+function objById(id){ return deskById(id)||fixById(id); }
+function deskOfStudent(sid){ for(var i=0;i<desks.length;i++) if(desks[i].studentId===sid) return desks[i]; return null; }
+
+/* ================= spreadsheet import ================= */
+/* Minimal .xlsx reader: unzip (stored/deflate) + parse the first worksheet. No libraries. */
+function inflateRaw(bytes){
+  if(typeof DecompressionStream==="undefined") return Promise.reject(new Error("nozip"));
+  var ds=new DecompressionStream("deflate-raw");
+  return new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer()
+    .then(function(b){ return new Uint8Array(b); });
+}
+function readZip(buf){
+  var u=new Uint8Array(buf), dv=new DataView(buf), i, eocd=-1;
+  for(i=u.length-22;i>=0 && i>u.length-66000;i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+  if(eocd<0) throw new Error("Not a valid .xlsx file.");
+  var count=dv.getUint16(eocd+10,true), off=dv.getUint32(eocd+16,true), entries={}, p=off;
+  for(i=0;i<count;i++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    var method=dv.getUint16(p+10,true), csize=dv.getUint32(p+20,true);
+    var nlen=dv.getUint16(p+28,true), elen=dv.getUint16(p+30,true), clen=dv.getUint16(p+32,true);
+    var lho=dv.getUint32(p+42,true);
+    var name=new TextDecoder().decode(u.subarray(p+46,p+46+nlen));
+    entries[name]={method:method,csize:csize,lho:lho};
+    p+=46+nlen+elen+clen;
+  }
+  return {u:u, dv:dv, entries:entries};
+}
+function zipRead(z,name){
+  var e=z.entries[name]; if(!e) return Promise.resolve(null);
+  var nlen=z.dv.getUint16(e.lho+26,true), elen=z.dv.getUint16(e.lho+28,true);
+  var start=e.lho+30+nlen+elen, data=z.u.subarray(start,start+e.csize);
+  var p = e.method===0 ? Promise.resolve(data) : inflateRaw(data);
+  return p.then(function(bytes){ return new TextDecoder("utf-8").decode(bytes); });
+}
+function colIndex(ref){
+  var m=/^([A-Z]+)/.exec(ref); if(!m) return 0;
+  var s=m[1], n=0;
+  for(var i=0;i<s.length;i++) n=n*26+(s.charCodeAt(i)-64);
+  return n-1;
+}
+function parseXlsx(buf){
+  var z=readZip(buf), shared=[];
+  return zipRead(z,"xl/sharedStrings.xml").then(function(ss){
+    if(ss){
+      var doc=new DOMParser().parseFromString(ss,"application/xml");
+      var si=doc.getElementsByTagName("si");
+      for(var i=0;i<si.length;i++){
+        var ts=si[i].getElementsByTagName("t"), txt="";
+        for(var j=0;j<ts.length;j++) txt+=ts[j].textContent;
+        shared.push(txt);
+      }
+    }
+    /* find the first sheet in workbook order */
+    return zipRead(z,"xl/_rels/workbook.xml.rels").then(function(rels){
+      return zipRead(z,"xl/workbook.xml").then(function(wb){
+        var target=null;
+        try{
+          var wd=new DOMParser().parseFromString(wb,"application/xml");
+          var sh=wd.getElementsByTagName("sheet")[0];
+          var rid=sh.getAttribute("r:id")||sh.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id");
+          var rd=new DOMParser().parseFromString(rels,"application/xml");
+          var rs=rd.getElementsByTagName("Relationship");
+          for(var i=0;i<rs.length;i++) if(rs[i].getAttribute("Id")===rid){
+            target=rs[i].getAttribute("Target").replace(/^\/?xl\//,"").replace(/^\//,"");
+          }
+        }catch(err){}
+        var path = target ? ("xl/"+target) : null;
+        if(!path || !z.entries[path]){
+          path=Object.keys(z.entries).filter(function(k){ return /^xl\/worksheets\/.*\.xml$/.test(k); }).sort()[0];
+        }
+        if(!path) throw new Error("No worksheet found in the file.");
+        return zipRead(z,path);
+      });
+    }).then(function(sheet){
+      var doc=new DOMParser().parseFromString(sheet,"application/xml");
+      var rows=doc.getElementsByTagName("row"), grid=[];
+      for(var r=0;r<rows.length;r++){
+        var cs=rows[r].getElementsByTagName("c"), line=[];
+        for(var c=0;c<cs.length;c++){
+          var cell=cs[c], t=cell.getAttribute("t"), ref=cell.getAttribute("r")||"", idx=colIndex(ref);
+          var v="", vt=cell.getElementsByTagName("v")[0];
+          if(t==="s" && vt) v=shared[parseInt(vt.textContent,10)]||"";
+          else if(t==="inlineStr"){ var is=cell.getElementsByTagName("t"); for(var k=0;k<is.length;k++) v+=is[k].textContent; }
+          else if(vt) v=vt.textContent;
+          line[idx]=String(v).trim();
+        }
+        grid.push(line);
+      }
+      return grid;
+    });
+  });
+}
+function parseCsv(text){
+  return text.split(/\r?\n/).filter(function(l){ return l.trim(); })
+    .map(function(l){
+      if(l.indexOf("\t")>=0) return l.split("\t").map(function(x){ return x.trim(); });
+      var out=[], cur="", q=false;
+      for(var i=0;i<l.length;i++){
+        var ch=l[i];
+        if(ch==='"'){ q=!q; continue; }
+        if(ch==="," && !q){ out.push(cur.trim()); cur=""; continue; }
+        cur+=ch;
+      }
+      out.push(cur.trim()); return out;
+    });
+}
+function gridToList(grid){
+  /* drop empty rows */
+  grid=grid.filter(function(r){ return r && r.join("").trim()!==""; });
+  if(!grid.length) throw new Error("The file looks empty.");
+  var noCol=-1, nameCol=-1, startRow=0;
+  for(var r=0;r<Math.min(6,grid.length);r++){
+    var row=grid[r], nc=-1, mc=-1;
+    for(var c=0;c<row.length;c++){
+      var v=(row[c]||"").toLowerCase();
+      if(mc<0 && /name|姓名|學生|学生/.test(v)) mc=c;
+      if(nc<0 && /(class\s*)?(no|num|number)\b|學號|学号|編號|编号|座號|座位/.test(v)) nc=c;
+    }
+    if(mc>=0){ nameCol=mc; noCol=nc; startRow=r+1; break; }
+  }
+  if(nameCol<0){
+    /* no header: guess by content */
+    var col0num=0, col1num=0, n=0;
+    grid.forEach(function(row){
+      if(!row.length) return; n++;
+      if(/^\d{1,3}$/.test((row[0]||"").trim())) col0num++;
+      if(/^\d{1,3}$/.test((row[1]||"").trim())) col1num++;
+    });
+    if(col0num>n*0.6){ noCol=0; nameCol=1; }
+    else if(col1num>n*0.6){ noCol=1; nameCol=0; }
+    else { noCol=-1; nameCol=0; }
+    startRow=0;
+  }
+  var out=[], auto=1;
+  for(var i=startRow;i<grid.length;i++){
+    var row=grid[i]||[];
+    var name=(row[nameCol]||"").trim();
+    var noRaw=noCol>=0 ? (row[noCol]||"").trim() : "";
+    if(!name && !noRaw) continue;
+    var no=parseInt(noRaw,10);
+    if(isNaN(no)) no=auto;
+    auto=no+1;
+    out.push({no:no,name:name});
+  }
+  if(!out.length) throw new Error("Could not find any student rows.");
+  return out;
+}
+function loadFile(file){
+  var info=$("fileInfo");
+  info.style.color="var(--muted)"; info.textContent="Reading "+file.name+"…";
+  var isXlsx=/\.xlsx$/i.test(file.name);
+  var reader=new FileReader();
+  reader.onload=function(){
+    var p;
+    try{ p = isXlsx ? parseXlsx(reader.result) : Promise.resolve(parseCsv(reader.result)); }
+    catch(err){ p=Promise.reject(err); }
+    p.then(function(grid){
+      var list=gridToList(grid);
+      $("names").value=list.map(function(s){ return s.no+"\t"+s.name; }).join("\n");
+      $("numStudents").value=list.length;
+      applyList();
+      info.style.color="#16794a";
+      info.textContent="✓ "+list.length+" students loaded from "+file.name+" and placed on the plan.";
+    }).catch(function(err){
+      info.style.color="#a4501a";
+      info.textContent="Couldn't read that file ("+(err.message||err)+"). Try saving it as .csv in Excel, or paste the list below.";
+    });
+  };
+  reader.onerror=function(){ info.style.color="#a4501a"; info.textContent="Couldn't open that file."; };
+  if(isXlsx) reader.readAsArrayBuffer(file); else reader.readAsText(file);
+}
+
+/* ================= layouts ================= */
+function groupSizes(n,per){
+  var g=Math.max(1,Math.ceil(n/per)), base=Math.floor(n/g), rem=n%g, out=[];
+  for(var i=0;i<g;i++) out.push(base+(i<rem?1:0));
+  return out;
+}
+function layoutPods(n){
+  var per=Math.max(1,parseInt($("groupSize").value,10)||5);
+  var perRow=Math.max(1,parseInt($("perRow").value,10)||3);
+  var sizes=groupSizes(n,per), g=sizes.length, rows=Math.ceil(g/perRow);
+  var cellW=(RW-60)/perRow, cellH=(RH-120)/rows;
+  var cols=Math.max(1,Math.ceil(per/2)), podRows=Math.ceil(Math.max.apply(null,sizes)/cols);
+  var dw=Math.min(150,(cellW*0.84)/cols-12), dh=Math.min(84,(cellH*0.86)/podRows-24);
+  var out=[];
+  for(var p=0;p<g;p++){
+    var r=Math.floor(p/perRow), c=p%perRow;
+    var cx=30+cellW*(c+0.5), cy=100+cellH*(r+0.5), size=sizes[p], pr=Math.ceil(size/cols);
+    for(var s=0;s<size;s++){
+      var rr=Math.floor(s/cols), cc=s%cols, inRow=Math.min(cols,size-rr*cols);
+      out.push({x:cx+(cc-(inRow-1)/2)*(dw+12), y:cy+(rr-(pr-1)/2)*(dh+26), rot:0, group:p});
+    }
+  }
+  return {pos:out,dw:dw,dh:dh};
+}
+function layoutPairs(n){
+  /* two desks pushed together = one "row unit" */
+  var pairs=Math.ceil(n/2);
+  var ppr=Math.max(1,parseInt($("perRow").value,10)||3);
+  var rows=Math.ceil(pairs/ppr);
+  var cellW=(RW-70)/ppr, cellH=(RH-130)/rows;
+  var dw=Math.min(140,(cellW*0.80)/2), dh=Math.min(78,cellH*0.58);
+  var out=[], i=0;
+  for(var p=0;p<pairs;p++){
+    var r=Math.floor(p/ppr), c=p%ppr, inRow=Math.min(ppr,pairs-r*ppr);
+    var cx=RW/2+(c-(inRow-1)/2)*cellW, cy=125+cellH*(r+0.5);
+    for(var s=0;s<2 && i<n;s++,i++)
+      out.push({x:cx+(s===0?-dw/2:dw/2), y:cy, rot:0, group:p});
+  }
+  return {pos:out,dw:dw,dh:dh};
+}
+function layoutRows(n){
+  var per=Math.max(1,parseInt($("groupSize").value,10)||5);
+  var cols=Math.min(9,Math.max(3,Math.ceil(Math.sqrt(n*1.7))));
+  var rows=Math.ceil(n/cols);
+  var dw=Math.min(140,(RW-80)/cols-16), dh=Math.min(80,(RH-140)/rows-24);
+  var out=[];
+  for(var i=0;i<n;i++){
+    var r=Math.floor(i/cols), c=i%cols, inRow=Math.min(cols,n-r*cols);
+    out.push({x:RW/2+(c-(inRow-1)/2)*(dw+16), y:130+r*(dh+24)+dh/2, rot:0, group:Math.floor(i/per)});
+  }
+  return {pos:out,dw:dw,dh:dh};
+}
+function layoutU(n){
+  var per=Math.max(1,parseInt($("groupSize").value,10)||5);
+  var dw=112, dh=62, gap=14, out=[], i=0, ring=0;
+  while(i<n && ring<5){
+    var L=85+ring*(dh+dw*0.55), R=RW-85-ring*(dh+dw*0.55);
+    var T=150+ring*(dh+34), B=RH-70-ring*(dh+34);
+    if(R-L<dw*2.2 || B-T<dw) break;
+    var sideN=Math.max(0,Math.floor((B-T-dw)/(dw+gap))+1);
+    var botN=Math.max(1,Math.floor((R-L-dh*2-30)/(dw+gap))+1);
+    var cap=sideN*2+botN, take=Math.min(cap,n-i), bn,s1,s2;
+    if(take>=cap){ s1=sideN; bn=botN; s2=sideN; }
+    else { bn=Math.min(botN,Math.max(1,Math.round(take*botN/cap)));
+           var rest=take-bn; s1=Math.ceil(rest/2); s2=rest-s1; }
+    var pitch=sideN>1?(B-T-dw)/(sideN-1):0, a,b,c;
+    for(a=0;a<s1;a++,i++) out.push({x:L,y:T+dw/2+a*pitch,rot:90});
+    for(b=0;b<bn;b++,i++) out.push({x:(L+R)/2+(b-(bn-1)/2)*(dw+gap),y:B,rot:0});
+    for(c=0;c<s2;c++,i++) out.push({x:R,y:B-dw/2-c*pitch,rot:270});
+    ring++;
+  }
+  while(i<n){ out.push({x:RW/2+(i-n)*20+60,y:RH/2,rot:0}); i++; }
+  out.forEach(function(p,k){ p.group=Math.floor(k/per); });
+  return {pos:out,dw:dw,dh:dh};
+}
+function applyLayout(kind,keep){
+  var n=students.length; if(!n) return;
+  var L = kind==="rows"?layoutRows(n) : kind==="u"?layoutU(n) : kind==="pairs"?layoutPairs(n) : layoutPods(n);
+  var old = keep ? desks.map(function(d){ return d.studentId; }) : [];
+  desks=L.pos.map(function(p,i){
+    return {id:"d"+(nextId++), x:p.x, y:p.y, rot:p.rot, w:L.dw, h:L.dh,
+            group:p.group, studentId: old[i]!==undefined?old[i]:null};
+  });
+  sel=[];
+}
+
+/* ================= fixtures ================= */
+function addFixture(type){
+  var spec={teacher:{w:220,h:80,text:"Teacher's desk"},door:{w:100,h:24,text:"Door"},
+            window:{w:230,h:20,text:"Window"},cupboard:{w:140,h:50,text:"Cupboard"},
+            label:{w:160,h:44,text:"Label"}}[type];
+  var f={id:"f"+(nextId++),type:type,x:RW/2,y:RH/2,rot:0,w:spec.w,h:spec.h,text:spec.text};
+  if(type==="teacher"){ f.x=RW-200; f.y=110; }
+  if(type==="door"){ f.x=110; f.y=RH-14; }
+  if(type==="window"){ f.x=RW-14; f.y=RH/2; f.rot=90; }
+  if(type==="label"){ f.text=prompt("Label text:","Notes")||"Label"; }
+  fixtures.push(f); sel=[f.id]; render();
+}
+function addDesk(){
+  var d={id:"d"+(nextId++),x:RW/2,y:RH/2,rot:0,
+         w:desks.length?desks[0].w:130,h:desks.length?desks[0].h:70,
+         group:desks.length?desks[desks.length-1].group:0,studentId:null};
+  desks.push(d); sel=[d.id]; render();
+}
+
+/* ================= display ================= */
+function disp(o){
+  var m=$("mirror").checked;
+  return {x:m?RW-o.x:o.x, y:o.y, rot:m?(360-(o.rot||0))%360:(o.rot||0)};
+}
+function fontFor(hUnits){
+  /* text scales with desk height, in units of 1% of the room width -> works on screen and in print */
+  var k=hUnits/RW*100*0.34;
+  if(useCq) return k+"cqw";
+  return (k/100*room.getBoundingClientRect().width)+"px";
+}
+/* Work out the biggest text size at which "Name (12)" fits inside a desk.
+   Used by both the on-screen desks and the exported image, so they match exactly. */
+var mctx=document.createElement("canvas").getContext("2d");
+function wrapLines(ctx,text,maxW){
+  var words=String(text).split(/\s+/), lines=[], line="", longest=0;
+  words.forEach(function(wd){
+    var t=line?line+" "+wd:wd;
+    if(ctx.measureText(t).width>maxW && line){ lines.push(line); line=wd; } else line=t;
+  });
+  if(line) lines.push(line);
+  lines.forEach(function(l){ longest=Math.max(longest,ctx.measureText(l).width); });
+  return {arr:lines, longest:longest};
+}
+var EMS=[0.90,0.80,0.70,0.62,0.54,0.47,0.41,0.35,0.30];
+function labelLayout(name,no,w,h){
+  var base=h*0.34, maxW=w*0.86, maxH=h*0.74, tail="("+no+")", best=null;
+  for(var i=0;i<EMS.length;i++){
+    var fs=base*EMS[i];
+    mctx.font=fs+"px Helvetica, Arial, sans-serif";
+    var L=wrapLines(mctx,name,maxW);
+    var lastW=mctx.measureText(L.arr[L.arr.length-1]).width, spaceW=mctx.measureText(" ").width;
+    mctx.font="700 "+(fs*0.72)+"px Helvetica, Arial, sans-serif";
+    var tw=mctx.measureText(tail).width;
+    var inline=(lastW+spaceW+tw)<=maxW;
+    var total=L.arr.length+(inline?0:1);
+    best={em:EMS[i],fs:fs,lines:L.arr,inline:inline,tail:tail,tailW:tw,lh:fs*1.15};
+    if(L.longest<=maxW && total<=2 && total*fs*1.15<=maxH) return best;
+  }
+  best.lines=best.lines.slice(0,2);
+  return best;
+}
+/* Apply whatever is in the class-list box to the students already on the plan.
+   Same number of students -> names update in place and the seating is kept. */
+function applyList(){
+  var listed=parseNames($("names").value);
+  if(!listed.length) return false;
+  if(listed.length===students.length){
+    students.forEach(function(s,i){ s.no=listed[i].no; s.name=listed[i].name; });
+    render();
+  } else {
+    students=listed.map(function(l,i){ return {id:"s"+i,no:l.no,name:l.name}; });
+    $("numStudents").value=listed.length;
+    applyLayout($("seatStyle").value,false);
+    fillRandom();
+  }
+  return true;
+}
+function render(){
+  Array.prototype.forEach.call(room.querySelectorAll(".desk,.fix,.marquee"),function(e){ e.remove(); });
+  room.className="room "+(mode==="arrange"?"arrange":"seatmode")+($("snap").checked&&mode==="arrange"?" grid":"");
+  var showNames=$("showNames").checked, upright=$("upright").checked, cols=$("colours").checked;
+
+  fixtures.forEach(function(f){
+    var d=disp(f), el=document.createElement("div");
+    el.className="fix "+f.type; el.dataset.id=f.id;
+    place(el,d,f.w,f.h);
+    el.style.fontSize=fontFor(Math.min(f.h,34)*1.15);
+    var t=document.createElement("span"); t.textContent=f.text; el.appendChild(t);
+    if(sel.indexOf(f.id)>=0) el.classList.add("sel");
+    room.appendChild(el);
+  });
+
+  desks.forEach(function(dk){
+    var d=disp(dk), st=dk.studentId?studentById(dk.studentId):null;
+    var w=dk.w*deskScale, h=dk.h*deskScale;
+    var el=document.createElement("div");
+    el.className="desk"+(st?"":" empty"); el.dataset.id=dk.id;
+    place(el,d,w,h);
+    el.style.fontSize=fontFor(h);
+    if(cols && st){
+      el.style.background=GROUP_COLS[dk.group%GROUP_COLS.length];
+      el.style.borderColor=GROUP_BRD[dk.group%GROUP_BRD.length];
+      el.style.webkitPrintColorAdjust="exact"; el.style.printColorAdjust="exact";
+    }
+    var inner=document.createElement("div");
+    inner.style.maxWidth="100%";
+    if(upright && d.rot%360!==0) inner.style.transform="rotate("+(-d.rot)+"deg)";
+    if(st && showNames && st.name){
+      var L=labelLayout(st.name,st.no,w,h), html="";
+      L.lines.forEach(function(line,i){
+        var last=(i===L.lines.length-1);
+        html+='<span class="nml">'+esc(line)+
+              (last&&L.inline?' <span class="no">'+L.tail+'</span>':'')+'</span>';
+      });
+      if(!L.inline) html+='<span class="nml"><span class="no">'+L.tail+'</span></span>';
+      inner.innerHTML='<span class="nm" style="font-size:'+L.em+'em">'+html+'</span>';
+    } else {
+      inner.innerHTML = st ? '<span class="numonly">'+st.no+'</span>'
+                           : '<span class="numonly">empty</span>';
+    }
+    el.appendChild(inner);
+    var chair=document.createElement("div"); chair.className="chair"; el.appendChild(chair);
+    if(sel.indexOf(dk.id)>=0) el.classList.add("sel");
+    if(mode==="seat" && st) el.draggable=true;
+    room.appendChild(el);
+  });
+
+  renderRoster();
+  printDirty=true;
+  if(typeof saveState==="function") saveState();
+  $("planTitle").textContent=$("className").value||"Seating Plan";
+  $("viewNote").textContent=$("mirror").checked
+    ? "Teacher's view — mirrored, as seen standing at the front"
+    : "Student's view — as seen facing the front";
+  $("deskSizeVal").textContent=Math.round(deskScale*100)+"%";
+  $("modeHint").textContent = mode==="arrange"
+    ? "Arrange mode: drag desks anywhere, drag empty space to select several, R rotates, ⌫ deletes."
+    : "Drag a student to the right onto a desk. Drag desk to desk to swap; click a desk to unseat.";
+}
+function place(el,d,w,h){
+  el.style.left=(d.x/RW*100)+"%"; el.style.top=(d.y/RH*100)+"%";
+  el.style.width=(w/RW*100)+"%"; el.style.height=(h/RH*100)+"%";
+  el.style.transform="translate(-50%,-50%) rotate("+d.rot+"deg)";
+}
+function renderRoster(){
+  var box=$("roster"); box.innerHTML="";
+  var named=students.filter(function(s){ return s.name; }).length;
+  $("noNames").style.display = (students.length && !named) ? "block" : "none";
+  var un=students.filter(function(s){ return !deskOfStudent(s.id); });
+  $("rosterCount").textContent="("+un.length+")";
+  if(!un.length){ box.innerHTML='<span style="font-size:12px;color:var(--muted)">Everyone is seated.</span>'; return; }
+  un.forEach(function(s){
+    var c=document.createElement("span");
+    c.className="chip"; c.draggable=true; c.dataset.student=s.id;
+    c.innerHTML="<b>"+s.no+"</b>"+(s.name?" "+esc(s.name):"");
+    box.appendChild(c);
+  });
+}
+function esc(t){ return String(t).replace(/[&<>"]/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+if(!useCq){ window.addEventListener("resize", function(){ render(); }); }
+
+/* ================= arrange: pointer drag ================= */
+var drag=null, marquee=null;
+room.addEventListener("pointerdown",function(e){
+  if(mode!=="arrange") return;
+  var el=e.target.closest(".desk,.fix"), rect=room.getBoundingClientRect();
+  var px=(e.clientX-rect.left)/rect.width*RW, py=(e.clientY-rect.top)/rect.height*RH;
+  if(el){
+    var id=el.dataset.id;
+    if(e.shiftKey){ var i=sel.indexOf(id); if(i>=0) sel.splice(i,1); else sel.push(id); }
+    else if(sel.indexOf(id)<0) sel=[id];
+    drag={sx:px,sy:py,start:sel.map(function(s){ var o=objById(s); return {id:s,x:o.x,y:o.y}; })};
+    room.setPointerCapture(e.pointerId); render();
+  } else {
+    if(!e.shiftKey) sel=[];
+    marquee={sx:px,sy:py,el:document.createElement("div")};
+    marquee.el.className="marquee";
+    room.setPointerCapture(e.pointerId); render(); room.appendChild(marquee.el);
+  }
+  e.preventDefault();
+});
+room.addEventListener("pointermove",function(e){
+  if(mode!=="arrange") return;
+  var rect=room.getBoundingClientRect();
+  var px=(e.clientX-rect.left)/rect.width*RW, py=(e.clientY-rect.top)/rect.height*RH;
+  var mir=$("mirror").checked;
+  if(drag){
+    var dx=(px-drag.sx)*(mir?-1:1), dy=py-drag.sy;
+    drag.start.forEach(function(s){
+      var o=objById(s.id); if(!o) return;
+      var nx=s.x+dx, ny=s.y+dy;
+      if($("snap").checked){ nx=Math.round(nx/GRID)*GRID; ny=Math.round(ny/GRID)*GRID; }
+      o.x=Math.max(0,Math.min(RW,nx)); o.y=Math.max(0,Math.min(RH,ny));
+    });
+    render();
+  } else if(marquee){
+    var x1=Math.min(marquee.sx,px), x2=Math.max(marquee.sx,px);
+    var y1=Math.min(marquee.sy,py), y2=Math.max(marquee.sy,py);
+    marquee.el.style.left=(x1/RW*100)+"%"; marquee.el.style.top=(y1/RH*100)+"%";
+    marquee.el.style.width=((x2-x1)/RW*100)+"%"; marquee.el.style.height=((y2-y1)/RH*100)+"%";
+    marquee.box=[x1,y1,x2,y2];
+  }
+});
+room.addEventListener("pointerup",function(){
+  if(marquee){
+    if(marquee.box){
+      var b=marquee.box;
+      desks.concat(fixtures).forEach(function(o){
+        var d=disp(o);
+        if(d.x>=b[0]&&d.x<=b[2]&&d.y>=b[1]&&d.y<=b[3]&&sel.indexOf(o.id)<0) sel.push(o.id);
+      });
+    }
+    marquee.el.remove(); marquee=null; render();
+  }
+  drag=null;
+});
+
+/* ================= seat mode: HTML5 drag ================= */
+var dragData=null;
+document.addEventListener("dragstart",function(e){
+  var chip=e.target.closest?e.target.closest(".chip"):null;
+  var desk=e.target.closest?e.target.closest(".desk"):null;
+  if(chip){ dragData={type:"student",id:chip.dataset.student}; chip.classList.add("dragging"); }
+  else if(mode==="seat"&&desk&&deskById(desk.dataset.id).studentId){ dragData={type:"desk",id:desk.dataset.id}; }
+  else return;
+  e.dataTransfer.effectAllowed="move";
+  try{ e.dataTransfer.setData("text/plain",dragData.id); }catch(err){}
+});
+document.addEventListener("dragend",function(){
+  dragData=null;
+  Array.prototype.forEach.call(document.querySelectorAll(".dragging,.over"),function(el){
+    el.classList.remove("dragging"); el.classList.remove("over"); });
+});
+document.addEventListener("dragover",function(e){
+  if(!dragData) return;
+  var t=e.target.closest?(e.target.closest(".desk")||e.target.closest("#roster")):null;
+  if(!t) return;
+  e.preventDefault(); e.dataTransfer.dropEffect="move"; t.classList.add("over");
+});
+document.addEventListener("dragleave",function(e){
+  var t=e.target.closest?(e.target.closest(".desk")||e.target.closest("#roster")):null;
+  if(t) t.classList.remove("over");
+});
+document.addEventListener("drop",function(e){
+  if(!dragData) return;
+  var deskEl=e.target.closest?e.target.closest(".desk"):null;
+  var rosterEl=e.target.closest?e.target.closest("#roster"):null;
+  if(!deskEl&&!rosterEl) return;
+  e.preventDefault();
+  if(rosterEl){
+    if(dragData.type==="desk") deskById(dragData.id).studentId=null;
+  } else {
+    var target=deskById(deskEl.dataset.id);
+    if(dragData.type==="student"){
+      var prev=deskOfStudent(dragData.id);
+      if(prev) prev.studentId=target.studentId;
+      target.studentId=dragData.id;
+    } else {
+      var src=deskById(dragData.id);
+      if(src!==target){ var t=target.studentId; target.studentId=src.studentId; src.studentId=t; }
+    }
+  }
+  dragData=null; render();
+});
+room.addEventListener("click",function(e){
+  if(mode!=="seat") return;
+  var el=e.target.closest?e.target.closest(".desk"):null; if(!el) return;
+  var d=deskById(el.dataset.id);
+  if(d&&d.studentId){ d.studentId=null; render(); }
+});
+
+/* ================= keyboard ================= */
+document.addEventListener("keydown",function(e){
+  if(/input|textarea|select/i.test(e.target.tagName)) return;
+  if(!sel.length) return;
+  var step=e.shiftKey?GRID*2:GRID/2, done=false;
+  if(e.key==="r"||e.key==="R"){ rotateSel(e.shiftKey?-45:45); done=true; }
+  else if(e.key==="ArrowLeft"){ nudge(-step,0); done=true; }
+  else if(e.key==="ArrowRight"){ nudge(step,0); done=true; }
+  else if(e.key==="ArrowUp"){ nudge(0,-step); done=true; }
+  else if(e.key==="ArrowDown"){ nudge(0,step); done=true; }
+  else if(e.key==="Backspace"||e.key==="Delete"){ deleteSel(); done=true; }
+  if(done){ e.preventDefault(); render(); }
+});
+function rotateSel(by){
+  var mir=$("mirror").checked?-1:1;
+  sel.forEach(function(id){ var o=objById(id); if(o) o.rot=((o.rot||0)+by*mir+360)%360; });
+}
+function nudge(dx,dy){
+  var mir=$("mirror").checked?-1:1;
+  sel.forEach(function(id){ var o=objById(id); if(!o) return;
+    o.x=Math.max(0,Math.min(RW,o.x+dx*mir)); o.y=Math.max(0,Math.min(RH,o.y+dy)); });
+}
+function deleteSel(){
+  sel.forEach(function(id){
+    var i;
+    for(i=0;i<desks.length;i++) if(desks[i].id===id){ desks.splice(i,1); return; }
+    for(i=0;i<fixtures.length;i++) if(fixtures[i].id===id){ fixtures.splice(i,1); return; }
+  });
+  sel=[];
+}
+
+/* ================= assignment ================= */
+function shuffle(a){ for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+function fillRandom(){
+  var free=desks.filter(function(d){ return !d.studentId; });
+  var un=shuffle(students.filter(function(s){ return !deskOfStudent(s.id); }));
+  for(var i=0;i<free.length&&i<un.length;i++) free[i].studentId=un[i].id;
+  render();
+}
+function seatedInOrder(){
+  return desks.slice().sort(function(a,b){ var A=disp(a),B=disp(b); return (A.y-B.y)||(A.x-B.x); });
+}
+
+/* ================= canvas render (PNG / Word) ================= */
+function renderCanvas(scale){
+  scale=scale||2;
+  var c=document.createElement("canvas"); c.width=RW*scale; c.height=RH*scale;
+  var g=c.getContext("2d"); g.scale(scale,scale);
+  g.fillStyle="#ffffff"; g.fillRect(0,0,RW,RH);
+  g.strokeStyle="#c9d1d9"; g.lineWidth=1.5; g.strokeRect(1,1,RW-2,RH-2);
+  g.fillStyle="#1f4e79"; roundRect(g,RW*0.04,RH*0.016,RW*0.92,RH*0.052,4); g.fill();
+  g.fillStyle="#fff"; g.font="600 15px Helvetica, Arial, sans-serif";
+  g.textAlign="center"; g.textBaseline="middle";
+  g.fillText("FRONT OF CLASSROOM / WHITEBOARD",RW/2,RH*0.016+RH*0.026);
+
+  var showNames=$("showNames").checked, upright=$("upright").checked, cols=$("colours").checked;
+
+  fixtures.forEach(function(f){
+    var d=disp(f);
+    g.save(); g.translate(d.x,d.y); g.rotate(d.rot*Math.PI/180);
+    var st={teacher:["#eef3f8","#9fb4c8","#3d5a75"],door:["#f6e8e2","#cba793","#8a6350"],
+            window:["#e4f0f6","#9dbccd","#4d7387"],cupboard:["#f3ece0","#b9a68a","#7a6a52"],
+            label:["#ffffff","#d5dbe1","#5b6672"]}[f.type];
+    g.fillStyle=st[0]; g.strokeStyle=st[1]; g.lineWidth=1.5;
+    roundRect(g,-f.w/2,-f.h/2,f.w,f.h,4); g.fill(); g.stroke();
+    g.fillStyle=st[2]; g.font=Math.min(14,f.h*0.55)+"px Helvetica, Arial, sans-serif";
+    g.textAlign="center"; g.textBaseline="middle"; g.fillText(f.text,0,0);
+    g.restore();
+  });
+
+  desks.forEach(function(dk){
+    var d=disp(dk), s=dk.studentId?studentById(dk.studentId):null;
+    var w=dk.w*deskScale, h=dk.h*deskScale;
+    g.save(); g.translate(d.x,d.y); g.rotate(d.rot*Math.PI/180);
+    g.fillStyle=s?(cols?GROUP_COLS[dk.group%GROUP_COLS.length]:"#ffffff"):"#f7f8fa";
+    g.strokeStyle=s?(cols?GROUP_BRD[dk.group%GROUP_BRD.length]:"#c3ccd6"):"#d3d9df";
+    g.lineWidth=1.5;
+    roundRect(g,-w/2,-h/2,w,h,5); g.fill();
+    if(!s) g.setLineDash([4,3]);
+    g.stroke(); g.setLineDash([]);
+    g.fillStyle="#b9c4d0"; g.fillRect(-w*0.26,h/2-h*0.10,w*0.52,h*0.065);
+    if(upright) g.rotate(-d.rot*Math.PI/180);
+    g.textAlign="center"; g.textBaseline="middle";
+    if(s){
+      if(showNames && s.name) drawLabel(g,s.name,s.no,w,h);
+      else {
+        g.fillStyle="#1f4e79"; g.font="700 "+Math.round(h*0.42)+"px Helvetica, Arial, sans-serif";
+        g.fillText(String(s.no),0,-h*0.03);
+      }
+    } else {
+      g.fillStyle="#aab3bd"; g.font=Math.round(h*0.2)+"px Helvetica, Arial, sans-serif";
+      g.fillText("empty",0,-h*0.03);
+    }
+    g.restore();
+  });
+  return c;
+}
+function roundRect(g,x,y,w,h,r){
+  g.beginPath(); g.moveTo(x+r,y); g.lineTo(x+w-r,y); g.quadraticCurveTo(x+w,y,x+w,y+r);
+  g.lineTo(x+w,y+h-r); g.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  g.lineTo(x+r,y+h); g.quadraticCurveTo(x,y+h,x,y+h-r);
+  g.lineTo(x,y+r); g.quadraticCurveTo(x,y,x+r,y); g.closePath();
+}
+/* name in full, class number after it in smaller brackets — same layout as the screen */
+function drawLabel(g,name,no,w,h){
+  var L=labelLayout(name,no,w,h);
+  var nameFont="600 "+L.fs+"px Helvetica, Arial, sans-serif";
+  var noFont="700 "+(L.fs*0.72)+"px Helvetica, Arial, sans-serif";
+  var total=L.lines.length+(L.inline?0:1), y0=-((total-1)/2)*L.lh;
+  g.font=nameFont; var gapW=g.measureText(" ").width;
+  for(var i=0;i<L.lines.length;i++){
+    g.font=nameFont; g.fillStyle="#1c2430";
+    if(i===L.lines.length-1 && L.inline){
+      var lw=g.measureText(L.lines[i]).width, tot=lw+gapW+L.tailW, sx=-tot/2;
+      g.textAlign="left";
+      g.fillText(L.lines[i],sx,y0+i*L.lh);
+      g.font=noFont; g.fillStyle="#1f4e79";
+      g.fillText(L.tail,sx+lw+gapW,y0+i*L.lh);
+      g.textAlign="center";
+    } else g.fillText(L.lines[i],0,y0+i*L.lh);
+  }
+  if(!L.inline){
+    g.font=noFont; g.fillStyle="#1f4e79"; g.textAlign="center";
+    g.fillText(L.tail,0,y0+L.lines.length*L.lh);
+  }
+}
+function wrapText(g,text,x,y,maxW,lh){
+  if(g.measureText(text).width<=maxW){ g.fillText(text,x,y); return; }
+  var words=text.split(/\s+/), line="", lines=[];
+  words.forEach(function(w){
+    var t=line?line+" "+w:w;
+    if(g.measureText(t).width>maxW && line){ lines.push(line); line=w; } else line=t;
+  });
+  if(line) lines.push(line);
+  lines=lines.slice(0,2);
+  lines.forEach(function(l,i){
+    while(g.measureText(l).width>maxW && l.length>2) l=l.slice(0,-1);
+    g.fillText(l,x,y+(i-(lines.length-1)/2)*lh);
+  });
+}
+
+/* ================= exports ================= */
+function safeName(){
+  return ($("className").value||"seating-plan").replace(/[^\w一-鿿\- ]+/g,"").trim().replace(/\s+/g,"_")||"seating-plan";
+}
+function download(name,blob){
+  var url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },600);
+}
+function exportPng(){ renderCanvas(2).toBlob(function(b){ download(safeName()+".png",b); }); }
+function exportWord(){
+  var img=renderCanvas(2).toDataURL("image/png");
+  var title=$("className").value||"Seating Plan";
+  var note=$("mirror").checked?"Teacher's view — mirrored, as seen standing at the front"
+                              :"Student's view — as seen facing the front";
+  var rowsHtml="", n=0;
+  seatedInOrder().forEach(function(d){
+    if(!d.studentId) return;
+    var s=studentById(d.studentId); n++;
+    rowsHtml+='<tr><td style="border:1px solid #bbb;padding:3px 6px;text-align:center">'+n+'</td>'+
+      '<td style="border:1px solid #bbb;padding:3px 6px;text-align:center">'+(d.group+1)+'</td>'+
+      '<td style="border:1px solid #bbb;padding:3px 6px;text-align:center">'+s.no+'</td>'+
+      '<td style="border:1px solid #bbb;padding:3px 6px">'+esc(s.name)+'</td></tr>';
+  });
+  var html='<html xmlns:o="urn:schemas-microsoft-com:office:office" '+
+    'xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'+
+    '<head><meta charset="utf-8"><title>'+esc(title)+'</title>'+
+    '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->'+
+    '<style>@page{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1.2cm}'+
+    'body{font-family:Calibri,Arial,sans-serif}</style></head><body>'+
+    '<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 8px">'+esc(title)+'</p>'+
+    '<p style="text-align:center;font-size:8.5pt;color:#666;margin:0 0 10px">'+note+'</p>'+
+    '<p style="text-align:center"><img src="'+img+'" style="width:26.5cm"></p>'+
+    '<br style="page-break-before:always">'+
+    '<p style="font-size:13pt;font-weight:bold">'+esc(title)+' — seat list</p>'+
+    '<table style="border-collapse:collapse;font-size:10pt">'+
+    '<tr style="background:#eef3f8"><th style="border:1px solid #bbb;padding:3px 6px">Seat</th>'+
+    '<th style="border:1px solid #bbb;padding:3px 6px">Group / pair</th>'+
+    '<th style="border:1px solid #bbb;padding:3px 6px">Class no.</th>'+
+    '<th style="border:1px solid #bbb;padding:3px 6px">Name</th></tr>'+rowsHtml+'</table></body></html>';
+  download(safeName()+".doc",new Blob(["﻿",html],{type:"application/msword"}));
+}
+
+/* ================= wiring ================= */
+function setMode(m){
+  mode=m; sel=[];
+  Array.prototype.forEach.call($("modes").querySelectorAll("button"),function(x){
+    x.classList.toggle("on",x.dataset.mode===m); });
+  render();
+}
+$("modes").addEventListener("click",function(e){
+  var b=e.target.closest("button"); if(b) setMode(b.dataset.mode);
+});
+$("btnBuild").addEventListener("click",function(){
+  students=buildStudents(); applyLayout($("seatStyle").value,false); fillRandom();
+});
+$("preset").addEventListener("change",function(){
+  if(!this.value) return;
+  $("seatStyle").value=this.value;
+  applyLayout(this.value,true); this.value=""; render();
+});
+$("seatStyle").addEventListener("change",function(){ applyLayout(this.value,true); render(); });
+$("addItem").addEventListener("change",function(){
+  if(!this.value) return;
+  if(this.value==="desk") addDesk(); else addFixture(this.value);
+  this.value=""; setMode("arrange");
+});
+$("btnRotate").addEventListener("click",function(){
+  if(!sel.length){ alert("Switch to “Arrange desks” and click a desk first."); return; }
+  rotateSel(45); render();
+});
+$("btnDelete").addEventListener("click",function(){ deleteSel(); render(); });
+$("btnRandom").addEventListener("click",fillRandom);
+$("btnShuffle").addEventListener("click",function(){
+  desks.forEach(function(d){ d.studentId=null; }); fillRandom();
+});
+function preparePrint(){
+  sel=[]; render();
+  $("printImg").src=renderCanvas(2).toDataURL("image/png");
+  printDirty=false;
+}
+$("btnPdf").addEventListener("click",function(){
+  preparePrint();
+  var img=$("printImg"), fired=false;
+  var go=function(){ if(!fired){ fired=true; window.print(); } };
+  if(img.complete && img.naturalWidth) go();
+  else { img.onload=go; setTimeout(go,800); }
+});
+window.addEventListener("beforeprint",function(){ if(printDirty) preparePrint(); });
+$("btnWord").addEventListener("click",exportWord);
+$("btnPng").addEventListener("click",exportPng);
+$("deskSize").addEventListener("input",function(){ deskScale=this.value/100; render(); });
+["mirror","showNames","upright","colours","snap"].forEach(function(id){
+  $(id).addEventListener("change",render);
+});
+$("className").addEventListener("input",render);
+$("upload").addEventListener("change",function(){ if(this.files[0]) loadFile(this.files[0]); this.value=""; });
+/* typing or pasting a list applies straight away — no need to press Build */
+var listTimer=null;
+$("names").addEventListener("input",function(){
+  clearTimeout(listTimer);
+  listTimer=setTimeout(applyList,500);
+});
+$("names").addEventListener("change",function(){ clearTimeout(listTimer); applyList(); });
+
+/* ================= saving to this browser ================= */
+var LSKEY="stHilarySeatingPlan.v4", saveTimer=null;
+function stamp(t){
+  var d=new Date(t);
+  $("savedNote").innerHTML="💾 Saved in this browser — reopening this file brings the plan back.<br>"+
+    "Last saved "+d.toLocaleDateString()+" "+d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+}
+function saveState(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(function(){
+    try{
+      var st={v:4,at:Date.now(),title:$("className").value,
+        students:students,desks:desks,fixtures:fixtures,deskScale:deskScale,
+        f:{numStudents:$("numStudents").value,groupSize:$("groupSize").value,
+           perRow:$("perRow").value,startNo:$("startNo").value,
+           seatStyle:$("seatStyle").value,names:$("names").value},
+        c:{snap:$("snap").checked,mirror:$("mirror").checked,showNames:$("showNames").checked,
+           upright:$("upright").checked,colours:$("colours").checked}};
+      localStorage.setItem(LSKEY,JSON.stringify(st));
+      stamp(st.at);
+    }catch(err){
+      $("savedNote").textContent="This browser is blocking saved data, so the plan won't be remembered. Export to PDF or Word to keep it.";
+    }
+  },500);
+}
+function loadState(){
+  try{
+    var raw=localStorage.getItem(LSKEY); if(!raw) return false;
+    var st=JSON.parse(raw);
+    if(!st || !st.desks || !st.students || !st.students.length) return false;
+    students=st.students; desks=st.desks; fixtures=st.fixtures||[];
+    deskScale=st.deskScale||1; $("deskSize").value=Math.round(deskScale*100);
+    $("className").value=st.title||"Seating Plan";
+    if(st.f) ["numStudents","groupSize","perRow","startNo","seatStyle","names"].forEach(function(k){
+      if(st.f[k]!==undefined) $(k).value=st.f[k]; });
+    if(st.c) ["snap","mirror","showNames","upright","colours"].forEach(function(k){
+      if(st.c[k]!==undefined) $(k).checked=st.c[k]; });
+    nextId=desks.length+fixtures.length+1000;
+    if(st.at) stamp(st.at);
+    return true;
+  }catch(err){ return false; }
+}
+$("btnNew").addEventListener("click",function(){
+  if(!confirm("Clear the saved plan and start a new one?")) return;
+  try{ localStorage.removeItem(LSKEY); }catch(err){}
+  fixtures=[]; sel=[];
+  students=buildStudents(); applyLayout($("seatStyle").value,false); fillRandom();
+});
+
+/* start: restore the last plan, or build a fresh one */
+if(loadState()) render();
+else { students=buildStudents(); applyLayout("pods",false); fillRandom(); }
+})();
+</script>
+</body>
+</html>
