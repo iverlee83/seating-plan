@@ -120,7 +120,7 @@
 <body>
 
 <header>
-  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v8</span></h1>
+  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v10</span></h1>
   <div class="acts">
     <span class="modes" id="modes">
       <button data-mode="seat" class="on">Seat students</button>
@@ -148,7 +148,7 @@
     <button class="ghost" id="btnNew" title="Clear the saved plan and start again">New plan</button>
     <button class="ghost" id="btnClearAll" title="Empty every desk and send all students back to the unseated list">Clear all seating</button>
     <button class="ghost" id="btnByNo" title="Seat everyone in class number order, front to back">Assign by class no.</button>
-    <button class="ghost" id="btnShuffle" title="Seat everyone at random">Assign randomly</button>
+    <button class="ghost" id="btnShuffle" title="Fill any empty desks at random, without moving students already seated">Assign randomly</button>
     <button class="primary" id="btnPdf">PDF</button>
     <button class="primary" id="btnWord">Word</button>
     <button class="primary" id="btnPng">PNG</button>
@@ -212,6 +212,12 @@
     <input type="range" id="deskSize" min="60" max="170" value="100">
     <label for="nameSize">Name text size (px)</label>
     <input type="number" id="nameSize" min="8" max="30" step="1" value="14">
+    <label for="classroom">Classroom setting</label>
+    <select id="classroom" style="width:100%">
+      <option value="A">Classroom A — whiteboard at top (default)</option>
+      <option value="B">Classroom B — whiteboard at bottom</option>
+    </select>
+    <div class="hint">Assign by class no. always starts from the side nearer the whiteboard.</div>
     <div class="check"><input type="checkbox" id="snap" checked><label for="snap">Snap to grid</label></div>
     <div class="check"><input type="checkbox" id="mirror"><label for="mirror">Teacher's view (mirror)</label></div>
     <div class="check"><input type="checkbox" id="showNames" checked><label for="showNames">Show names on desks</label></div>
@@ -227,7 +233,7 @@
       <img id="printImg" alt="">
       <div class="viewnote" id="viewNote"></div>
     </div>
-    <footer class="noprint">PDF opens the print dialog — choose “Save as PDF”, landscape. Keyboard: R rotate, Shift+R back, arrows nudge, ⌫ delete.</footer>
+    <footer class="noprint">PDF downloads straight away as a landscape A4 file. Keyboard: R rotate, Shift+R back, arrows nudge, ⌫ delete.</footer>
   </main>
 </div>
 
@@ -586,9 +592,20 @@ function addDesk(){
 }
 
 /* ================= display ================= */
+/* Classroom A = whiteboard at top (default, no vertical flip).
+   Classroom B = whiteboard at bottom (room flipped top-to-bottom for display only —
+   the underlying stored x/y/rot never change). */
+function classroomB(){ return $("classroom") && $("classroom").value==="B"; }
+function viewNoteText(){
+  var base=$("mirror").checked ? "Teacher's view — mirrored, as seen standing at the front"
+                                : "Student's view — as seen facing the front";
+  return base+(classroomB() ? " · Classroom B (whiteboard at the bottom)" : "");
+}
 function disp(o){
-  var m=$("mirror").checked;
-  return {x:m?RW-o.x:o.x, y:o.y, rot:m?(360-(o.rot||0))%360:(o.rot||0)};
+  /* Classroom B only relocates things to the other end of the room — it does not spin
+     them, so desk labels and the whiteboard's own text stay upright and readable. */
+  var m=$("mirror").checked, v=classroomB();
+  return {x:m?RW-o.x:o.x, y:v?RH-o.y:o.y, rot:m?(360-(o.rot||0))%360:(o.rot||0)};
 }
 function fontFor(hUnits){
   /* text scales with desk height, in units of 1% of the room width -> works on screen and in print */
@@ -711,9 +728,7 @@ function render(){
   printDirty=true;
   if(typeof saveState==="function") saveState();
   $("planTitle").textContent=$("className").value||"Seating Plan";
-  $("viewNote").textContent=$("mirror").checked
-    ? "Teacher's view — mirrored, as seen standing at the front"
-    : "Student's view — as seen facing the front";
+  $("viewNote").textContent=viewNoteText();
   $("deskSizeVal").textContent=Math.round(deskScale*100)+"%";
   $("modeHint").textContent = mode==="arrange"
     ? "Arrange mode: drag anything (desks, whiteboard, door). Shift-click or lasso several, then R or Rotate turns them together. ⌫ deletes."
@@ -767,9 +782,9 @@ room.addEventListener("pointermove",function(e){
   if(mode!=="arrange") return;
   var rect=room.getBoundingClientRect();
   var px=(e.clientX-rect.left)/rect.width*RW, py=(e.clientY-rect.top)/rect.height*RH;
-  var mir=$("mirror").checked;
+  var mirX=$("mirror").checked?-1:1, mirY=classroomB()?-1:1;
   if(drag){
-    var dx=(px-drag.sx)*(mir?-1:1), dy=py-drag.sy;
+    var dx=(px-drag.sx)*mirX, dy=(py-drag.sy)*mirY;
     drag.start.forEach(function(s){
       var o=objById(s.id); if(!o) return;
       var nx=s.x+dx, ny=s.y+dy;
@@ -885,9 +900,9 @@ function rotateSel(by){
   } else objs[0].rot=((objs[0].rot||0)+step+360)%360;
 }
 function nudge(dx,dy){
-  var mir=$("mirror").checked?-1:1;
+  var mirX=$("mirror").checked?-1:1, mirY=classroomB()?-1:1;
   sel.forEach(function(id){ var o=objById(id); if(!o) return;
-    o.x=Math.max(0,Math.min(RW,o.x+dx*mir)); o.y=Math.max(0,Math.min(RH,o.y+dy)); });
+    o.x=Math.max(0,Math.min(RW,o.x+dx*mirX)); o.y=Math.max(0,Math.min(RH,o.y+dy*mirY)); });
 }
 function deleteSel(){
   sel.forEach(function(id){
@@ -918,7 +933,10 @@ function desksInReadingOrder(){
   });
   var out=[];
   cols.forEach(function(c){
-    c.items.sort(function(a,b){ return disp(a).y-disp(b).y; });
+    /* raw y, not display y: the whiteboard fixture sits near y=0 in raw space in both
+       Classroom A and B (Classroom B only flips how it's drawn), so ascending raw y is
+       always "nearer the front" regardless of orientation */
+    c.items.sort(function(a,b){ return a.y-b.y; });
     out=out.concat(c.items);
   });
   return out;
@@ -944,10 +962,6 @@ function renderCanvas(scale){
   var g=c.getContext("2d"); g.scale(scale,scale);
   g.fillStyle="#ffffff"; g.fillRect(0,0,RW,RH);
   g.strokeStyle="#c9d1d9"; g.lineWidth=1.5; g.strokeRect(1,1,RW-2,RH-2);
-  g.fillStyle="#1f4e79"; roundRect(g,RW*0.04,RH*0.016,RW*0.92,RH*0.052,4); g.fill();
-  g.fillStyle="#fff"; g.font="600 15px Helvetica, Arial, sans-serif";
-  g.textAlign="center"; g.textBaseline="middle";
-  g.fillText("FRONT OF CLASSROOM / WHITEBOARD",RW/2,RH*0.016+RH*0.026);
 
   var showNames=$("showNames").checked, upright=$("upright").checked, cols=$("colours").checked;
 
@@ -1048,11 +1062,106 @@ function download(name,blob){
   setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },600);
 }
 function exportPng(){ renderCanvas(2).toBlob(function(b){ download(safeName()+".png",b); }); }
+
+/* ---- PDF: built as a real file (no print dialog / "Save as PDF" step needed) ----
+   A single JPEG of the whole page (title, view note, room drawing) is embedded directly
+   in a hand-written, minimal one-page PDF using the standard DCTDecode trick — a JPEG's
+   own bytes can be used as a PDF image stream as-is, so no PDF or zip library is needed. */
+function renderPrintCanvas(){
+  var scale=3, pageWpt=841.89, pageHpt=595.28;           /* A4 landscape, in points */
+  var PW=Math.round(pageWpt*scale), PH=Math.round(pageHpt*scale), margin=28*scale;
+  var c=document.createElement("canvas"); c.width=PW; c.height=PH;
+  var g=c.getContext("2d");
+  g.fillStyle="#ffffff"; g.fillRect(0,0,PW,PH);
+  g.textAlign="center"; g.textBaseline="alphabetic";
+
+  var title=$("className").value||"Seating Plan", note=viewNoteText();
+  var titleSize=15*scale;
+  g.fillStyle="#1f2937"; g.font="700 "+titleSize+"px Calibri, Arial, Helvetica, sans-serif";
+  var titleY=margin+titleSize*0.85;
+  g.fillText(title,PW/2,titleY);
+  var noteSize=8.5*scale;
+  g.fillStyle="#666666"; g.font=noteSize+"px Calibri, Arial, Helvetica, sans-serif";
+  var noteY=titleY+noteSize+6*scale;
+  g.fillText(note,PW/2,noteY);
+
+  var top=noteY+10*scale, availW=PW-2*margin, availH=PH-margin-top;
+  var room=renderCanvas(2), aspect=RW/RH, drawW=availW, drawH=drawW/aspect;
+  if(drawH>availH){ drawH=availH; drawW=drawH*aspect; }
+  var dx=(PW-drawW)/2, dy=top+(availH-drawH)/2;
+  g.drawImage(room,dx,dy,drawW,drawH);
+  return c;
+}
+function dataUrlToBytes(dataUrl){
+  var bin=atob(dataUrl.split(",")[1]), bytes=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+function pad10(n){ var s=String(n); while(s.length<10) s="0"+s; return s; }
+function buildImagePdf(jpegBytes,pxW,pxH){
+  var pageW=841.89, pageH=595.28;
+  var canvasAspect=pxW/pxH, pageAspect=pageW/pageH, imgW=pageW, imgH=pageH;
+  if(canvasAspect>pageAspect){ imgW=pageW; imgH=pageW/canvasAspect; }
+  else { imgH=pageH; imgW=pageH*canvasAspect; }
+  var x=((pageW-imgW)/2).toFixed(2), y=((pageH-imgH)/2).toFixed(2);
+  var wStr=imgW.toFixed(2), hStr=imgH.toFixed(2);
+  var contentStr="q "+wStr+" 0 0 "+hStr+" "+x+" "+y+" cm /Im0 Do Q";
+
+  function toBytes(s){ var b=new Uint8Array(s.length); for(var i=0;i<s.length;i++) b[i]=s.charCodeAt(i)&0xff; return b; }
+  var parts=[], pos=0, offs=[];
+  function push(bytes){ parts.push(bytes); pos+=bytes.length; }
+  function pushStr(s){ push(toBytes(s)); }
+
+  pushStr("%PDF-1.4\n");
+
+  offs[1]=pos;
+  pushStr("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+  offs[2]=pos;
+  pushStr("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+  offs[3]=pos;
+  pushStr("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "+pageW.toFixed(2)+" "+pageH.toFixed(2)+"] "+
+    "/Resources << /XObject << /Im0 5 0 R >> /ProcSet [/PDF /ImageC] >> /Contents 4 0 R >>\nendobj\n");
+
+  offs[4]=pos;
+  var contentBytes=toBytes(contentStr);
+  pushStr("4 0 obj\n<< /Length "+contentBytes.length+" >>\nstream\n");
+  push(contentBytes);
+  pushStr("\nendstream\nendobj\n");
+
+  offs[5]=pos;
+  pushStr("5 0 obj\n<< /Type /XObject /Subtype /Image /Width "+pxW+" /Height "+pxH+
+    " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length "+jpegBytes.length+" >>\nstream\n");
+  push(jpegBytes);
+  pushStr("\nendstream\nendobj\n");
+
+  var xrefStart=pos, xref="xref\n0 6\n0000000000 65535 f \n";
+  for(var i=1;i<=5;i++) xref+=pad10(offs[i])+" 00000 n \n";
+  pushStr(xref);
+  pushStr("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"+xrefStart+"\n%%EOF");
+
+  var total=0; parts.forEach(function(p){ total+=p.length; });
+  var out=new Uint8Array(total), o=0;
+  parts.forEach(function(p){ out.set(p,o); o+=p.length; });
+  return new Blob([out],{type:"application/pdf"});
+}
+function exportPdf(){
+  var page=renderPrintCanvas();
+  var jpegBytes=dataUrlToBytes(page.toDataURL("image/jpeg",0.92));
+  download(safeName()+".pdf",buildImagePdf(jpegBytes,page.width,page.height));
+}
 function exportWord(){
   var img=renderCanvas(2).toDataURL("image/png");
   var title=$("className").value||"Seating Plan";
-  var note=$("mirror").checked?"Teacher's view — mirrored, as seen standing at the front"
-                              :"Student's view — as seen facing the front";
+  var note=viewNoteText();
+  /* Work out an image size (in cm) that is guaranteed to fit on one A4 landscape
+     page alongside the title/note text above it, instead of a fixed width that could
+     run past the page and spill onto a second page. */
+  var pageWcm=29.7, pageHcm=21, marginCm=1, textOverheadCm=1.3;
+  var usableWcm=pageWcm-2*marginCm, usableHcm=pageHcm-2*marginCm-textOverheadCm;
+  var aspect=RW/RH, imgWcm=usableWcm, imgHcm=imgWcm/aspect;
+  if(imgHcm>usableHcm){ imgHcm=usableHcm; imgWcm=imgHcm*aspect; }
   var rowsHtml="", n=0;
   seatedInOrder().forEach(function(d){
     if(!d.studentId) return;
@@ -1065,12 +1174,13 @@ function exportWord(){
   var html='<html xmlns:o="urn:schemas-microsoft-com:office:office" '+
     'xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">'+
     '<head><meta charset="utf-8"><title>'+esc(title)+'</title>'+
-    '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->'+
-    '<style>@page{size:29.7cm 21cm;mso-page-orientation:landscape;margin:1.2cm}'+
+    '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>'+
+    '<w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->'+
+    '<style>@page{size:29.7cm 21cm;mso-page-orientation:landscape;margin:'+marginCm+'cm}'+
     'body{font-family:Calibri,Arial,sans-serif}</style></head><body>'+
-    '<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 8px">'+esc(title)+'</p>'+
-    '<p style="text-align:center;font-size:8.5pt;color:#666;margin:0 0 10px">'+note+'</p>'+
-    '<p style="text-align:center"><img src="'+img+'" style="width:26.5cm"></p>'+
+    '<p style="text-align:center;font-size:14pt;font-weight:bold;margin:0 0 4px">'+esc(title)+'</p>'+
+    '<p style="text-align:center;font-size:8pt;color:#666;margin:0 0 6px">'+note+'</p>'+
+    '<p style="text-align:center;margin:0"><img src="'+img+'" style="width:'+imgWcm.toFixed(2)+'cm;height:'+imgHcm.toFixed(2)+'cm"></p>'+
     '<br style="page-break-before:always">'+
     '<p style="font-size:13pt;font-weight:bold">'+esc(title)+' — seat list</p>'+
     '<table style="border-collapse:collapse;font-size:10pt">'+
@@ -1132,26 +1242,19 @@ $("btnRotate").addEventListener("click",function(){
 $("btnDelete").addEventListener("click",function(){ deleteSel(); render(); });
 $("btnClearAll").addEventListener("click",clearAllSeating);
 $("btnByNo").addEventListener("click",assignByClassNo);
-$("btnShuffle").addEventListener("click",function(){
-  desks.forEach(function(d){ d.studentId=null; }); fillRandom();
-});
+$("btnShuffle").addEventListener("click",fillRandom);
 function preparePrint(){
   sel=[]; render();
   $("printImg").src=renderCanvas(2).toDataURL("image/png");
   printDirty=false;
 }
-$("btnPdf").addEventListener("click",function(){
-  preparePrint();
-  var img=$("printImg"), fired=false;
-  var go=function(){ if(!fired){ fired=true; window.print(); } };
-  if(img.complete && img.naturalWidth) go();
-  else { img.onload=go; setTimeout(go,800); }
-});
+$("btnPdf").addEventListener("click",exportPdf);
+/* Ctrl+P / File > Print still works and matches the same look, in case a teacher prefers it */
 window.addEventListener("beforeprint",function(){ if(printDirty) preparePrint(); });
 $("btnWord").addEventListener("click",exportWord);
 $("btnPng").addEventListener("click",exportPng);
 $("deskSize").addEventListener("input",function(){ deskScale=this.value/100; render(); });
-["mirror","showNames","upright","colours","snap"].forEach(function(id){
+["mirror","classroom","showNames","upright","colours","snap"].forEach(function(id){
   $(id).addEventListener("change",render);
 });
 $("nameSize").addEventListener("input",render);
@@ -1176,14 +1279,14 @@ function saveState(){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(function(){
     try{
-      var st={v:6,at:Date.now(),title:$("className").value,
+      var st={v:10,at:Date.now(),title:$("className").value,
         students:students,desks:desks,fixtures:fixtures,deskScale:deskScale,
         f:{numStudents:$("numStudents").value,groupSize:$("groupSize").value,
            perRow:$("perRow").value,startNo:$("startNo").value,
            seatStyle:$("seatStyle").value,names:$("names").value,
            nameSize:$("nameSize").value,rowCols:$("rowCols").value},
         c:{snap:$("snap").checked,mirror:$("mirror").checked,showNames:$("showNames").checked,
-           upright:$("upright").checked,colours:$("colours").checked}};
+           upright:$("upright").checked,colours:$("colours").checked,classroom:$("classroom").value}};
       localStorage.setItem(LSKEY,JSON.stringify(st));
       stamp(st.at);
     }catch(err){
@@ -1205,6 +1308,7 @@ function loadState(){
     updateRowColsUI($("seatStyle").value);
     if(st.c) ["snap","mirror","showNames","upright","colours"].forEach(function(k){
       if(st.c[k]!==undefined) $(k).checked=st.c[k]; });
+    $("classroom").value=(st.c && st.c.classroom==="B") ? "B" : "A";
     if(!(st.v>=6)){                       /* plans saved before v5: adopt the new defaults */
       $("upright").checked=false;
       $("nameSize").value=14;
