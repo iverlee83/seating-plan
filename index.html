@@ -120,7 +120,7 @@
 <body>
 
 <header>
-  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v10</span></h1>
+  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v11</span></h1>
   <div class="acts">
     <span class="modes" id="modes">
       <button data-mode="seat" class="on">Seat students</button>
@@ -203,7 +203,7 @@
     <textarea id="names" placeholder="1 Chan Tai Man
 2 Wong Siu Ling
 3, Lee Ka Yan"></textarea>
-    <div class="hint">Space, comma, tab, full-stop or dash all work as separators. Leave empty to use class numbers only.</div>
+    <div class="hint">Space, comma, tab, full-stop or dash all work as separators. Leave empty to use class numbers only.<br>Removing a name here removes just that desk; adding a name adds just one extra desk — nobody else's seat moves.</div>
     <button class="wide" id="btnBuild">Build seating plan</button>
     <div class="hint">Rebuilding replaces the desks. Room fixtures (door, window, teacher's desk) stay where you put them.</div>
 
@@ -590,6 +590,30 @@ function addDesk(){
          group:desks.length?desks[desks.length-1].group:0,studentId:null};
   desks.push(d); sel=[d.id]; render();
 }
+/* A new student enrolled: drop one extra desk in without touching anyone else's desk.
+   Scans the room, left to right then row by row, for the first spot that doesn't
+   overlap an existing desk or room fixture (whiteboard, teacher's desk, door...) —
+   so adding several students in one go fills separate spots instead of piling up,
+   and never lands the new desk on top of the whiteboard — then seats that student
+   there right away. */
+function addDeskFor(student){
+  var w=desks.length?desks[0].w:130, h=desks.length?desks[0].h:70;
+  var x0=w/2+10, y0=h/2+10, gapX=20, gapY=20, cellW=w+gapX, cellH=h+gapY;
+  var x=RW/2, y=RH/2, found=!desks.length && !fixtures.length;
+  function overlaps(px,py){
+    var near=function(o){ return Math.abs(o.x-px)<(w+o.w)/2*0.9 && Math.abs(o.y-py)<(h+o.h)/2*0.9; };
+    return desks.some(near) || fixtures.some(near);
+  }
+  for(var ry=y0; !found && ry<=RH-h/2-10; ry+=cellH){
+    for(var rx=x0; rx<=RW-w/2-10; rx+=cellW){
+      if(!overlaps(rx,ry)){ x=rx; y=ry; found=true; break; }
+    }
+  }
+  var d={id:"d"+(nextId++),x:snapPos(x),y:snapPos(y),rot:0,w:w,h:h,
+         group:desks.length?desks[desks.length-1].group:0,studentId:student.id};
+  desks.push(d);
+  return d;
+}
 
 /* ================= display ================= */
 /* Classroom A = whiteboard at top (default, no vertical flip).
@@ -659,19 +683,48 @@ function labelLayout(name,no,w,h){
   return res;
 }
 /* Apply whatever is in the class-list box to the students already on the plan.
-   Same number of students -> names update in place and the seating is kept. */
+   This never re-arranges the room: a name that's still in the box keeps its student
+   object (and therefore its desk) exactly as-is; a name that disappeared is a
+   withdrawal (its desk is simply removed); a name that's new is an admission (one
+   extra desk is added for them, everything else untouched). Students are matched by
+   name (stable even if class numbers get renumbered after a withdrawal) and fall
+   back to matching by class number only for still-blank placeholder entries. */
+function rosterKey(name,no){
+  var n=(name||"").trim().toLowerCase();
+  return n ? "n:"+n : "no:"+no;
+}
 function applyList(){
   var listed=parseNames($("names").value);
   if(!listed.length) return false;
-  if(listed.length===students.length){
-    students.forEach(function(s,i){ s.no=listed[i].no; s.name=listed[i].name; });
-    render();
-  } else {
-    students=listed.map(function(l,i){ return {id:"s"+i,no:l.no,name:l.name}; });
-    $("numStudents").value=listed.length;
-    applyLayout($("seatStyle").value,false);
-    fillRandom();
-  }
+
+  var oldByKey={};
+  students.forEach(function(s){ oldByKey[rosterKey(s.name,s.no)]=s; });
+
+  var kept={}, newStudents=[], added=[];
+  listed.forEach(function(l){
+    var existing=oldByKey[rosterKey(l.name,l.no)];
+    if(existing && !kept[existing.id]){
+      existing.no=l.no; existing.name=l.name;
+      newStudents.push(existing);
+      kept[existing.id]=true;
+    } else {
+      var s={id:"s"+(nextId++),no:l.no,name:l.name};
+      newStudents.push(s);
+      added.push(s);
+    }
+  });
+
+  students.forEach(function(s){                 /* withdrawn: no longer in the box */
+    if(kept[s.id]) return;
+    var d=deskOfStudent(s.id);
+    if(d){ var i=desks.indexOf(d); if(i>=0) desks.splice(i,1); }
+  });
+
+  students=newStudents;
+  $("numStudents").value=students.length;
+  added.forEach(function(s){ addDeskFor(s); });  /* admitted: one new desk each */
+
+  sel=[]; render();
   return true;
 }
 function render(){
@@ -1279,7 +1332,7 @@ function saveState(){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(function(){
     try{
-      var st={v:10,at:Date.now(),title:$("className").value,
+      var st={v:11,at:Date.now(),title:$("className").value,
         students:students,desks:desks,fixtures:fixtures,deskScale:deskScale,
         f:{numStudents:$("numStudents").value,groupSize:$("groupSize").value,
            perRow:$("perRow").value,startNo:$("startNo").value,
