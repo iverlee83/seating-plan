@@ -19,6 +19,8 @@
   button,select{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);
          padding:6px 11px;border-radius:7px;cursor:pointer}
   button:hover{background:#f0f3f6}
+  button:disabled,button[disabled]{opacity:.38;cursor:default}
+  button:disabled:hover{background:transparent}
   button.primary{background:#fff;color:var(--accent);border-color:#fff;font-weight:600}
   button.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
   button.ghost:hover{background:rgba(255,255,255,.15)}
@@ -89,6 +91,8 @@
   .desk.empty .numonly{color:#aab3bd;font-size:.6em;font-weight:500}
   .desk.sel{outline:2px solid var(--accent);outline-offset:2px;box-shadow:0 2px 8px rgba(31,78,121,.25)}
   .desk.over{outline:2px solid #16794a;outline-offset:2px}
+  /* the first desk picked for a click-to-swap */
+  .desk.pick{outline:3px dashed #b26a00;outline-offset:2px;box-shadow:0 2px 10px rgba(178,106,0,.3)}
   .fix{position:absolute;border:1.5px solid #b9a68a;background:#f3ece0;border-radius:4px;
        display:flex;align-items:center;justify-content:center;color:#7a6a52;
        text-align:center;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -120,12 +124,14 @@
 <body>
 
 <header>
-  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v11</span></h1>
+  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v12</span></h1>
   <div class="acts">
     <span class="modes" id="modes">
       <button data-mode="seat" class="on">Seat students</button>
       <button data-mode="arrange">Arrange desks</button>
     </span>
+    <button class="ghost" id="btnUndo" title="Nothing to undo" disabled>↶ Undo</button>
+    <button class="ghost" id="btnRedo" title="Nothing to redo" disabled>↷ Redo</button>
     <select id="preset" class="ghost" title="Auto-arrange">
       <option value="">Auto-arrange…</option>
       <option value="pods">Group pods</option>
@@ -205,7 +211,7 @@
 3, Lee Ka Yan"></textarea>
     <div class="hint">Space, comma, tab, full-stop or dash all work as separators. Leave empty to use class numbers only.<br>Removing a name here removes just that desk; adding a name adds just one extra desk — nobody else's seat moves.</div>
     <button class="wide" id="btnBuild">Build seating plan</button>
-    <div class="hint">Rebuilding replaces the desks. Room fixtures (door, window, teacher's desk) stay where you put them.</div>
+    <div class="hint">Rebuilding replaces the desks. Room fixtures (door, window, teacher's desk) stay where you put them.<br>Changed your mind? <b>Undo</b> (Ctrl+Z) puts the previous arrangement straight back — up to 30 steps.</div>
 
     <h2>Room &amp; display</h2>
     <label for="deskSize">Desk size <span id="deskSizeVal" style="color:var(--accent)"></span></label>
@@ -233,7 +239,7 @@
       <img id="printImg" alt="">
       <div class="viewnote" id="viewNote"></div>
     </div>
-    <footer class="noprint">PDF downloads straight away as a landscape A4 file. Keyboard: R rotate, Shift+R back, arrows nudge, ⌫ delete.</footer>
+    <footer class="noprint">PDF downloads straight away as a landscape A4 file. Keyboard: Ctrl+Z undo, Ctrl+Y redo, R rotate, Shift+R back, arrows nudge, ⌫ delete, Esc cancel.</footer>
   </main>
 </div>
 
@@ -249,9 +255,98 @@ var GROUP_BRD=["#a9c4dc","#a8ceb3","#e2c193","#c5b2df","#e6adad","#a5cbd6","#d5c
 
 var students=[], desks=[], fixtures=[], sel=[];
 var mode="seat", nextId=1, deskScale=1, printDirty=true;
+var swapPick=null;                       /* first desk picked for a click-to-swap */
 var $=function(i){ return document.getElementById(i); };
 var room=$("room");
 var useCq = window.CSS && CSS.supports && CSS.supports("font-size","1cqw");
+
+/* ================= undo / redo =================
+   Anything that alters the plan — building, switching arrangement, shuffling,
+   assigning, dragging, rotating, deleting, adding an item, or editing the class
+   list — takes a snapshot of the whole room first, so it can always be put back.
+   Up to 30 steps, with Redo to come forward again. */
+var UNDO_MAX=30, undoStack=[], redoStack=[];
+/* the last committed contents of the text boxes: an "input" event fires after the
+   box has already changed, so the value it held beforehand has to be kept aside */
+var shadow={names:"",rowCols:"",numStudents:"",seatStyle:""};
+function syncShadow(){
+  shadow.names=$("names").value;
+  shadow.rowCols=$("rowCols").value;
+  shadow.numStudents=$("numStudents").value;
+  shadow.seatStyle=$("seatStyle").value;
+}
+function snapshot(useShadow){
+  var f={names:$("names").value,numStudents:$("numStudents").value,
+         seatStyle:$("seatStyle").value,rowCols:$("rowCols").value};
+  if(useShadow){ f.names=shadow.names; f.rowCols=shadow.rowCols;
+                 f.numStudents=shadow.numStudents; f.seatStyle=shadow.seatStyle; }
+  return JSON.stringify({students:students,desks:desks,fixtures:fixtures,
+                         deskScale:deskScale,nextId:nextId,f:f});
+}
+function commit(before){
+  if(before===null||before===undefined) return;
+  if(before===snapshot()){ syncShadow(); return; }      /* nothing actually changed */
+  undoStack.push(before);
+  while(undoStack.length>UNDO_MAX) undoStack.shift();
+  redoStack.length=0;
+  syncShadow(); updateUndoUI();
+}
+/* run a change and record it as one undo step.
+   useShadow = the change came from a box or dropdown the browser has already
+   updated, so the value it held before the change is taken from the shadow. */
+function act(fn,useShadow){ var b=snapshot(useShadow); fn(); commit(b); }
+/* changes that arrive as a burst — typing a list, dragging the size slider,
+   holding an arrow key — are gathered into a single undo step */
+var bursts={};
+function actBurst(key,fn,ms,useShadow){
+  if(!bursts[key]) bursts[key]={before:snapshot(useShadow),timer:null};
+  var b=bursts[key];
+  fn();
+  clearTimeout(b.timer);
+  b.timer=setTimeout(function(){ bursts[key]=null; commit(b.before); },ms||600);
+}
+function flushBurst(key){
+  var b=bursts[key]; if(!b) return;
+  clearTimeout(b.timer); bursts[key]=null; commit(b.before);
+}
+function flushAllBursts(){ Object.keys(bursts).forEach(function(k){ flushBurst(k); }); }
+/* an edit still waiting on its short delay is settled first, so Undo always
+   steps back over the change the user has just finished making */
+function flushPendingEdits(){ flushAllBursts(); if(listTimer) runList(); }
+function restoreSnapshot(json){
+  var st=JSON.parse(json);
+  students=st.students; desks=st.desks; fixtures=st.fixtures||[];
+  deskScale=st.deskScale||1; nextId=st.nextId||nextId;
+  $("deskSize").value=Math.round(deskScale*100);
+  if(st.f){
+    $("names").value=st.f.names; $("numStudents").value=st.f.numStudents;
+    $("seatStyle").value=st.f.seatStyle; $("rowCols").value=st.f.rowCols;
+  }
+  updateRowColsUI($("seatStyle").value);
+  sel=[]; swapPick=null; syncShadow(); render();
+}
+function doUndo(){
+  flushPendingEdits();
+  if(!undoStack.length) return;
+  redoStack.push(snapshot());
+  restoreSnapshot(undoStack.pop());
+  updateUndoUI();
+}
+function doRedo(){
+  flushPendingEdits();
+  if(!redoStack.length) return;
+  undoStack.push(snapshot());
+  restoreSnapshot(redoStack.pop());
+  updateUndoUI();
+}
+function updateUndoUI(){
+  var u=undoStack.length, r=redoStack.length;
+  $("btnUndo").disabled=!u;
+  $("btnRedo").disabled=!r;
+  $("btnUndo").title = u ? ("Undo the last change — "+u+" step"+(u===1?"":"s")+" available (Ctrl+Z)")
+                         : "Nothing to undo";
+  $("btnRedo").title = r ? "Redo (Ctrl+Y or Ctrl+Shift+Z)" : "Nothing to redo";
+}
 
 /* ================= students ================= */
 function parseNames(text){
@@ -431,6 +526,7 @@ function loadFile(file){
   var info=$("fileInfo");
   info.style.color="var(--muted)"; info.textContent="Reading "+file.name+"…";
   var isXlsx=/\.xlsx$/i.test(file.name);
+  var before=snapshot();                 /* loading a list is one undo step */
   var reader=new FileReader();
   reader.onload=function(){
     var p;
@@ -441,6 +537,7 @@ function loadFile(file){
       $("names").value=list.map(function(s){ return s.no+"\t"+s.name; }).join("\n");
       $("numStudents").value=list.length;
       applyList();
+      commit(before);
       info.style.color="#16794a";
       info.textContent="✓ "+list.length+" students loaded from "+file.name+" and placed on the plan.";
     }).catch(function(err){
@@ -728,6 +825,7 @@ function applyList(){
   return true;
 }
 function render(){
+  if(swapPick && !deskById(swapPick)) swapPick=null;   /* that desk has since gone */
   Array.prototype.forEach.call(room.querySelectorAll(".desk,.fix,.marquee"),function(e){ e.remove(); });
   room.className="room "+(mode==="arrange"?"arrange":"seatmode")+($("snap").checked&&mode==="arrange"?" grid":"");
   var showNames=$("showNames").checked, upright=$("upright").checked, cols=$("colours").checked;
@@ -773,6 +871,7 @@ function render(){
     el.appendChild(inner);
     var chair=document.createElement("div"); chair.className="chair"; el.appendChild(chair);
     if(sel.indexOf(dk.id)>=0) el.classList.add("sel");
+    if(mode==="seat" && swapPick===dk.id) el.classList.add("pick");
     if(mode==="seat" && st) el.draggable=true;
     room.appendChild(el);
   });
@@ -785,7 +884,9 @@ function render(){
   $("deskSizeVal").textContent=Math.round(deskScale*100)+"%";
   $("modeHint").textContent = mode==="arrange"
     ? "Arrange mode: drag anything (desks, whiteboard, door). Shift-click or lasso several, then R or Rotate turns them together. ⌫ deletes."
-    : "Drag a student to the right onto a desk. Drag desk to desk to swap; click a desk to unseat.";
+    : swapPick
+      ? "Now click a second desk to swap the two students (or an empty desk to move them there). Click the same desk again to unseat, or press Esc to cancel."
+      : "Drag a name from the left onto a desk. Or click one seated student, then another, to swap their seats.";
 }
 function place(el,d,w,h){
   el.style.left=(d.x/RW*100)+"%"; el.style.top=(d.y/RH*100)+"%";
@@ -821,7 +922,8 @@ room.addEventListener("pointerdown",function(e){
     var id=el.dataset.id;
     if(add){ var i=sel.indexOf(id); if(i>=0) sel.splice(i,1); else sel.push(id); }
     else if(sel.indexOf(id)<0) sel=[id];
-    drag={sx:px,sy:py,start:sel.map(function(s){ var o=objById(s); return {id:s,x:o.x,y:o.y}; })};
+    drag={sx:px,sy:py,before:snapshot(),
+          start:sel.map(function(s){ var o=objById(s); return {id:s,x:o.x,y:o.y}; })};
     room.setPointerCapture(e.pointerId); render();
   } else {
     if(!add) sel=[];
@@ -864,7 +966,7 @@ room.addEventListener("pointerup",function(){
     }
     marquee.el.remove(); marquee=null; render();
   }
-  drag=null;
+  if(drag){ commit(drag.before); drag=null; }   /* one undo step for the whole drag */
 });
 
 /* ================= seat mode: HTML5 drag ================= */
@@ -899,6 +1001,7 @@ document.addEventListener("drop",function(e){
   var rosterEl=e.target.closest?e.target.closest("#roster"):null;
   if(!deskEl&&!rosterEl) return;
   e.preventDefault();
+  var before=snapshot();
   if(rosterEl){
     if(dragData.type==="desk") deskById(dragData.id).studentId=null;
   } else {
@@ -912,26 +1015,54 @@ document.addEventListener("drop",function(e){
       if(src!==target){ var t=target.studentId; target.studentId=src.studentId; src.studentId=t; }
     }
   }
-  dragData=null; render();
+  dragData=null; swapPick=null; commit(before); render();
 });
+/* ---- seat mode: click one student, then another, to swap their seats ----
+   First click picks a seated student (the desk gets a dashed orange outline).
+   Second click on another desk swaps the two — or moves the student across if
+   that desk is empty. Clicking the same desk again unseats the student, and
+   Esc (or a click on empty floor) cancels. */
 room.addEventListener("click",function(e){
   if(mode!=="seat") return;
-  var el=e.target.closest?e.target.closest(".desk"):null; if(!el) return;
-  var d=deskById(el.dataset.id);
-  if(d&&d.studentId){ d.studentId=null; render(); }
+  var el=e.target.closest?e.target.closest(".desk"):null;
+  if(!el){ if(swapPick){ swapPick=null; render(); } return; }
+  var d=deskById(el.dataset.id); if(!d) return;
+
+  if(!swapPick){
+    if(!d.studentId) return;                       /* nothing to pick up on an empty desk */
+    swapPick=d.id; render(); return;
+  }
+  if(swapPick===d.id){                             /* same desk again: send them back to the list */
+    swapPick=null;
+    act(function(){ d.studentId=null; });
+    render(); return;
+  }
+  var src=deskById(swapPick);
+  swapPick=null;
+  if(!src){ render(); return; }
+  act(function(){ var t=d.studentId; d.studentId=src.studentId; src.studentId=t; });
+  render();
 });
 
 /* ================= keyboard ================= */
 document.addEventListener("keydown",function(e){
+  /* inside a text box the browser's own Ctrl+Z should keep working */
   if(/input|textarea|select/i.test(e.target.tagName)) return;
+  var meta=e.ctrlKey||e.metaKey;
+  if(meta && (e.key==="z"||e.key==="Z")){ e.preventDefault(); if(e.shiftKey) doRedo(); else doUndo(); return; }
+  if(meta && (e.key==="y"||e.key==="Y")){ e.preventDefault(); doRedo(); return; }
+  if(e.key==="Escape"){
+    if(swapPick||sel.length){ swapPick=null; sel=[]; e.preventDefault(); render(); }
+    return;
+  }
   if(!sel.length) return;
   var step=e.shiftKey?GRID*2:GRID/2, done=false;
-  if(e.key==="r"||e.key==="R"){ rotateSel(e.shiftKey?-45:45); done=true; }
-  else if(e.key==="ArrowLeft"){ nudge(-step,0); done=true; }
-  else if(e.key==="ArrowRight"){ nudge(step,0); done=true; }
-  else if(e.key==="ArrowUp"){ nudge(0,-step); done=true; }
-  else if(e.key==="ArrowDown"){ nudge(0,step); done=true; }
-  else if(e.key==="Backspace"||e.key==="Delete"){ deleteSel(); done=true; }
+  if(e.key==="r"||e.key==="R"){ act(function(){ rotateSel(e.shiftKey?-45:45); }); done=true; }
+  else if(e.key==="ArrowLeft"){ actBurst("nudge",function(){ nudge(-step,0); }); done=true; }
+  else if(e.key==="ArrowRight"){ actBurst("nudge",function(){ nudge(step,0); }); done=true; }
+  else if(e.key==="ArrowUp"){ actBurst("nudge",function(){ nudge(0,-step); }); done=true; }
+  else if(e.key==="ArrowDown"){ actBurst("nudge",function(){ nudge(0,step); }); done=true; }
+  else if(e.key==="Backspace"||e.key==="Delete"){ act(deleteSel); done=true; }
   if(done){ e.preventDefault(); render(); }
 });
 /* one item turns on the spot; several selected items turn together, as one block */
@@ -1246,7 +1377,7 @@ function exportWord(){
 
 /* ================= wiring ================= */
 function setMode(m){
-  mode=m; sel=[];
+  mode=m; sel=[]; swapPick=null;
   Array.prototype.forEach.call($("modes").querySelectorAll("button"),function(x){
     x.classList.toggle("on",x.dataset.mode===m); });
   render();
@@ -1254,8 +1385,10 @@ function setMode(m){
 $("modes").addEventListener("click",function(e){
   var b=e.target.closest("button"); if(b) setMode(b.dataset.mode);
 });
+$("btnUndo").addEventListener("click",doUndo);
+$("btnRedo").addEventListener("click",doRedo);
 $("btnBuild").addEventListener("click",function(){
-  students=buildStudents(); applyLayout($("seatStyle").value,false); fillRandom();
+  act(function(){ students=buildStudents(); applyLayout($("seatStyle").value,false); fillRandom(); });
 });
 var rowColsUserSet=false;
 function updateRowColsUI(style){
@@ -1266,17 +1399,21 @@ function updateRowColsUI(style){
 }
 $("rowCols").addEventListener("input",function(){
   rowColsUserSet=true;
-  if($("seatStyle").value==="rows"){ applyLayout("rows",true); render(); }
+  if($("seatStyle").value!=="rows") return;
+  actBurst("rowCols",function(){ applyLayout("rows",true); render(); },700,true);
 });
 $("preset").addEventListener("change",function(){
   if(!this.value) return;
-  $("seatStyle").value=this.value;
-  updateRowColsUI(this.value);
-  applyLayout(this.value,true); this.value=""; render();
+  var v=this.value; this.value="";
+  act(function(){
+    $("seatStyle").value=v;
+    updateRowColsUI(v);
+    applyLayout(v,true); render();
+  },true);
 });
 $("seatStyle").addEventListener("change",function(){
-  updateRowColsUI(this.value);
-  applyLayout(this.value,true); render();
+  var v=this.value;
+  act(function(){ updateRowColsUI(v); applyLayout(v,true); render(); },true);
 });
 $("numStudents").addEventListener("input",function(){
   if($("seatStyle").value==="rows" && !rowColsUserSet){
@@ -1285,17 +1422,18 @@ $("numStudents").addEventListener("input",function(){
 });
 $("addItem").addEventListener("change",function(){
   if(!this.value) return;
-  if(this.value==="desk") addDesk(); else addFixture(this.value);
-  this.value=""; setMode("arrange");
+  var v=this.value; this.value="";
+  act(function(){ if(v==="desk") addDesk(); else addFixture(v); });
+  setMode("arrange");
 });
 $("btnRotate").addEventListener("click",function(){
   if(!sel.length){ alert("Switch to “Arrange desks” and click a desk first."); return; }
-  rotateSel(45); render();
+  act(function(){ rotateSel(45); }); render();
 });
-$("btnDelete").addEventListener("click",function(){ deleteSel(); render(); });
-$("btnClearAll").addEventListener("click",clearAllSeating);
-$("btnByNo").addEventListener("click",assignByClassNo);
-$("btnShuffle").addEventListener("click",fillRandom);
+$("btnDelete").addEventListener("click",function(){ act(deleteSel); render(); });
+$("btnClearAll").addEventListener("click",function(){ act(clearAllSeating); });
+$("btnByNo").addEventListener("click",function(){ act(assignByClassNo); });
+$("btnShuffle").addEventListener("click",function(){ act(fillRandom); });
 function preparePrint(){
   sel=[]; render();
   $("printImg").src=renderCanvas(2).toDataURL("image/png");
@@ -1306,20 +1444,38 @@ $("btnPdf").addEventListener("click",exportPdf);
 window.addEventListener("beforeprint",function(){ if(printDirty) preparePrint(); });
 $("btnWord").addEventListener("click",exportWord);
 $("btnPng").addEventListener("click",exportPng);
-$("deskSize").addEventListener("input",function(){ deskScale=this.value/100; render(); });
+$("deskSize").addEventListener("input",function(){
+  var v=this.value;
+  actBurst("deskSize",function(){ deskScale=v/100; render(); },700);
+});
 ["mirror","classroom","showNames","upright","colours","snap"].forEach(function(id){
   $(id).addEventListener("change",render);
 });
 $("nameSize").addEventListener("input",render);
 $("className").addEventListener("input",render);
 $("upload").addEventListener("change",function(){ if(this.files[0]) loadFile(this.files[0]); this.value=""; });
-/* typing or pasting a list applies straight away — no need to press Build */
-var listTimer=null;
+/* typing or pasting a list applies straight away — no need to press Build.
+   A whole burst of typing becomes one undo step. */
+var listTimer=null, listBefore=null;
+function runList(){
+  clearTimeout(listTimer); listTimer=null;
+  var b=listBefore; listBefore=null;
+  /* Leaving the box fires "change" as well. If the text is already the version
+     that was applied, do nothing: re-rendering here would replace the desks
+     underneath the mouse and swallow the click the teacher is making. */
+  if($("names").value===shadow.names) return;
+  applyList();
+  commit(b);
+}
 $("names").addEventListener("input",function(){
+  if(listBefore===null) listBefore=snapshot(true);
   clearTimeout(listTimer);
-  listTimer=setTimeout(applyList,500);
+  listTimer=setTimeout(runList,500);
 });
-$("names").addEventListener("change",function(){ clearTimeout(listTimer); applyList(); });
+$("names").addEventListener("change",function(){
+  if(listBefore===null) listBefore=snapshot(true);
+  runList();
+});
 
 /* ================= saving to this browser ================= */
 var LSKEY="stHilarySeatingPlan.v4", saveTimer=null;
@@ -1332,7 +1488,7 @@ function saveState(){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(function(){
     try{
-      var st={v:11,at:Date.now(),title:$("className").value,
+      var st={v:12,at:Date.now(),title:$("className").value,
         students:students,desks:desks,fixtures:fixtures,deskScale:deskScale,
         f:{numStudents:$("numStudents").value,groupSize:$("groupSize").value,
            perRow:$("perRow").value,startNo:$("startNo").value,
@@ -1376,14 +1532,17 @@ function loadState(){
 $("btnNew").addEventListener("click",function(){
   if(!confirm("Clear the saved plan and start a new one?")) return;
   try{ localStorage.removeItem(LSKEY); }catch(err){}
-  fixtures=[]; sel=[]; ensureBoard();
-  rowColsUserSet=false; updateRowColsUI($("seatStyle").value);
-  students=buildStudents(); applyLayout($("seatStyle").value,false); fillRandom();
+  act(function(){
+    fixtures=[]; sel=[]; swapPick=null; ensureBoard();
+    rowColsUserSet=false; updateRowColsUI($("seatStyle").value);
+    students=buildStudents(); applyLayout($("seatStyle").value,false); fillRandom();
+  });
 });
 
 /* start: restore the last plan, or build a fresh one */
 if(loadState()){ ensureBoard(); render(); }
 else { ensureBoard(); updateRowColsUI($("seatStyle").value); students=buildStudents(); applyLayout("pods",false); fillRandom(); }
+syncShadow(); updateUndoUI();
 })();
 </script>
 </body>
