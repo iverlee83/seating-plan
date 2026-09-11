@@ -93,6 +93,18 @@
   .desk.over{outline:2px solid #16794a;outline-offset:2px}
   /* the first desk picked for a click-to-swap */
   .desk.pick{outline:3px dashed #b26a00;outline-offset:2px;box-shadow:0 2px 10px rgba(178,106,0,.3)}
+  /* small boy/girl marker, shown in the corner of a seated desk when
+     "Colour by gender" is on — click it to set or change that student's gender */
+  /* sits in the bottom-left corner, below the name text and clear of the
+     chair bar (which is centred), so it never overlaps the student's name */
+  .gtag{position:absolute;bottom:4%;left:3%;width:15%;max-width:18px;min-width:12px;aspect-ratio:1;
+        border-radius:50%;display:flex;align-items:center;justify-content:center;
+        font-size:.6em;font-weight:700;line-height:1;cursor:pointer;
+        border:1.3px solid rgba(0,0,0,.18);color:#fff;z-index:2}
+  .gtag.boy{background:#4a86c8}
+  .gtag.girl{background:#d5709a}
+  .gtag.unset{background:#aab3bd;color:#fff}
+  .seatmode .gtag:hover{filter:brightness(1.08);transform:scale(1.12)}
   .fix{position:absolute;border:1.5px solid #b9a68a;background:#f3ece0;border-radius:4px;
        display:flex;align-items:center;justify-content:center;color:#7a6a52;
        text-align:center;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -124,7 +136,7 @@
 <body>
 
 <header>
-  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v12</span></h1>
+  <h1>Seating Plan Generator <span style="opacity:.65;font-weight:400;font-size:12px">v13</span></h1>
   <div class="acts">
     <span class="modes" id="modes">
       <button data-mode="seat" class="on">Seat students</button>
@@ -204,12 +216,12 @@
     <h2>Class list</h2>
     <label for="upload" class="filebtn" id="uploadLabel">📄 Upload .xlsx or .csv class list</label>
     <input type="file" id="upload" accept=".xlsx,.csv,.txt" style="display:none">
-    <div id="fileInfo" class="hint">Two columns: class number and name (a header row is detected automatically).</div>
+    <div id="fileInfo" class="hint">Class number and name, plus an optional gender column (M/F) — a header row is detected automatically.</div>
     <label for="names">…or type / paste the list</label>
-    <textarea id="names" placeholder="1 Chan Tai Man
-2 Wong Siu Ling
+    <textarea id="names" placeholder="1 Chan Tai Man M
+2 Wong Siu Ling F
 3, Lee Ka Yan"></textarea>
-    <div class="hint">Space, comma, tab, full-stop or dash all work as separators. Leave empty to use class numbers only.<br>Removing a name here removes just that desk; adding a name adds just one extra desk — nobody else's seat moves.</div>
+    <div class="hint">Space, comma, tab, full-stop or dash all work as separators. Leave empty to use class numbers only.<br>Add M or F (or 男/女) after a name to record gender — or set it later by clicking the dot on a desk.<br>Removing a name here removes just that desk; adding a name adds just one extra desk — nobody else's seat moves.</div>
     <button class="wide" id="btnBuild">Build seating plan</button>
     <div class="hint">Rebuilding replaces the desks. Room fixtures (door, window, teacher's desk) stay where you put them.<br>Changed your mind? <b>Undo</b> (Ctrl+Z) puts the previous arrangement straight back — up to 30 steps.</div>
 
@@ -228,7 +240,9 @@
     <div class="check"><input type="checkbox" id="mirror"><label for="mirror">Teacher's view (mirror)</label></div>
     <div class="check"><input type="checkbox" id="showNames" checked><label for="showNames">Show names on desks</label></div>
     <div class="check"><input type="checkbox" id="upright"><label for="upright">Keep text upright when a desk is rotated</label></div>
-    <div class="check"><input type="checkbox" id="colours" checked><label for="colours">Colour-code groups / pairs</label></div>
+    <div class="check"><input type="checkbox" id="colours" checked><label for="colours">Colour-code groups / pairs (outline)</label></div>
+    <div class="check"><input type="checkbox" id="genderColours"><label for="genderColours">Colour by gender (boy = blue, girl = pink)</label></div>
+    <div class="hint">Combine both to see groups (thick outline) and the boy/girl split (fill) at the same time. In "Seat students" mode, click the small dot on a desk to set or change that student's gender.</div>
     <div class="hint" id="savedNote" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"></div>
   </aside>
 
@@ -349,14 +363,31 @@ function updateUndoUI(){
 }
 
 /* ================= students ================= */
+/* Pull an optional trailing gender marker off the end of a name: M/F/Male/Female/Boy/Girl
+   (with or without a separator before it), or 男/女 run straight on with no separator at
+   all — the common case for Chinese names. Anything else is left as part of the name. */
+function extractGender(str){
+  str=(str||"").trim();
+  var cm=str.match(/^(.+?)([男女])$/);
+  if(cm && cm[1].trim()) return {name:cm[1].trim(), gender:cm[2]==="男"?"M":"F"};
+  var m=str.match(/^(.*\S)[\s,，、.\-]+(male|female|boy|girl|[mf])$/i);
+  if(m){
+    var tok=m[2].toLowerCase();
+    var g=/^(m|male|boy)$/.test(tok)?"M":/^(f|female|girl)$/.test(tok)?"F":null;
+    if(g) return {name:m[1].trim(), gender:g};
+  }
+  return {name:str, gender:undefined};
+}
 function parseNames(text){
   var out=[], lines=text.split(/\r?\n/), auto=1;
   for(var i=0;i<lines.length;i++){
     var line=lines[i].trim(); if(!line) continue;
-    var m=line.match(/^(\d{1,3})\s*[\.,\)\-\t:]?\s*(.*)$/), no, name;
-    if(m && (m[2].length || /^\d{1,3}$/.test(line))){ no=parseInt(m[1],10); name=m[2].trim(); }
-    else { no=auto; name=line; }
-    auto=no+1; out.push({no:no,name:name});
+    var m=line.match(/^(\d{1,3})\s*[\.,\)\-\t:]?\s*(.*)$/), no, rest;
+    if(m && (m[2].length || /^\d{1,3}$/.test(line))){ no=parseInt(m[1],10); rest=m[2].trim(); }
+    else { no=auto; rest=line; }
+    auto=no+1;
+    var ng=extractGender(rest);
+    out.push({no:no,name:ng.name,gender:ng.gender});
   }
   return out;
 }
@@ -367,8 +398,8 @@ function buildStudents(){
   if(listed.length){ n=listed.length; $("numStudents").value=n; }
   var arr=[];
   for(var i=0;i<n;i++){
-    if(i<listed.length) arr.push({id:"s"+i,no:listed[i].no,name:listed[i].name});
-    else arr.push({id:"s"+i,no:start+i,name:""});
+    if(i<listed.length) arr.push({id:"s"+i,no:listed[i].no,name:listed[i].name,gender:listed[i].gender});
+    else arr.push({id:"s"+i,no:start+i,name:"",gender:undefined});
   }
   return arr;
 }
@@ -481,19 +512,46 @@ function parseCsv(text){
       out.push(cur.trim()); return out;
     });
 }
+function cellGender(v){
+  v=(v||"").trim();
+  if(/^(m|male|boy|男)$/i.test(v)) return "M";
+  if(/^(f|female|girl|女)$/i.test(v)) return "F";
+  return undefined;
+}
+/* When no gender header is found, guess the column: whichever one (other than
+   the number/name columns) is mostly M/F/男/女-type values. */
+function guessGenderCol(grid,startRow,skipCols){
+  var counts={}, seen={};
+  for(var r=startRow;r<grid.length;r++){
+    var row=grid[r]||[];
+    for(var c=0;c<row.length;c++){
+      if(skipCols.indexOf(c)>=0) continue;
+      var v=(row[c]||"").trim(); if(!v) continue;
+      seen[c]=(seen[c]||0)+1;
+      if(cellGender(v)) counts[c]=(counts[c]||0)+1;
+    }
+  }
+  var best=-1, bestScore=0;
+  Object.keys(counts).forEach(function(c){
+    var score=counts[c]/Math.max(1,seen[c]);
+    if(score>=0.7 && seen[c]>bestScore){ bestScore=seen[c]; best=+c; }
+  });
+  return best;
+}
 function gridToList(grid){
   /* drop empty rows */
   grid=grid.filter(function(r){ return r && r.join("").trim()!==""; });
   if(!grid.length) throw new Error("The file looks empty.");
-  var noCol=-1, nameCol=-1, startRow=0;
+  var noCol=-1, nameCol=-1, genderCol=-1, startRow=0;
   for(var r=0;r<Math.min(6,grid.length);r++){
-    var row=grid[r], nc=-1, mc=-1;
+    var row=grid[r], nc=-1, mc=-1, gc=-1;
     for(var c=0;c<row.length;c++){
       var v=(row[c]||"").toLowerCase();
       if(mc<0 && /name|姓名|學生|学生/.test(v)) mc=c;
       if(nc<0 && /(class\s*)?(no|num|number)\b|學號|学号|編號|编号|座號|座位/.test(v)) nc=c;
+      if(gc<0 && /gender|sex|性別|性别|男女/.test(v)) gc=c;
     }
-    if(mc>=0){ nameCol=mc; noCol=nc; startRow=r+1; break; }
+    if(mc>=0){ nameCol=mc; noCol=nc; genderCol=gc; startRow=r+1; break; }
   }
   if(nameCol<0){
     /* no header: guess by content */
@@ -508,6 +566,7 @@ function gridToList(grid){
     else { noCol=-1; nameCol=0; }
     startRow=0;
   }
+  if(genderCol<0) genderCol=guessGenderCol(grid,startRow,[noCol,nameCol]);
   var out=[], auto=1;
   for(var i=startRow;i<grid.length;i++){
     var row=grid[i]||[];
@@ -517,7 +576,10 @@ function gridToList(grid){
     var no=parseInt(noRaw,10);
     if(isNaN(no)) no=auto;
     auto=no+1;
-    out.push({no:no,name:name});
+    var gender = genderCol>=0 ? cellGender(row[genderCol]) : undefined;
+    /* fall back to a trailing M/F/男/女 written straight into the name cell itself */
+    if(!gender){ var ng=extractGender(name); name=ng.name; gender=ng.gender; }
+    out.push({no:no,name:name,gender:gender});
   }
   if(!out.length) throw new Error("Could not find any student rows.");
   return out;
@@ -534,7 +596,7 @@ function loadFile(file){
     catch(err){ p=Promise.reject(err); }
     p.then(function(grid){
       var list=gridToList(grid);
-      $("names").value=list.map(function(s){ return s.no+"\t"+s.name; }).join("\n");
+      $("names").value=list.map(function(s){ return s.no+"\t"+s.name+(s.gender?"\t"+s.gender:""); }).join("\n");
       $("numStudents").value=list.length;
       applyList();
       commit(before);
@@ -802,10 +864,12 @@ function applyList(){
     var existing=oldByKey[rosterKey(l.name,l.no)];
     if(existing && !kept[existing.id]){
       existing.no=l.no; existing.name=l.name;
+      /* a gender typed or set earlier is kept if this edit doesn't specify one */
+      if(l.gender!==undefined) existing.gender=l.gender;
       newStudents.push(existing);
       kept[existing.id]=true;
     } else {
-      var s={id:"s"+(nextId++),no:l.no,name:l.name};
+      var s={id:"s"+(nextId++),no:l.no,name:l.name,gender:l.gender};
       newStudents.push(s);
       added.push(s);
     }
@@ -829,6 +893,7 @@ function render(){
   Array.prototype.forEach.call(room.querySelectorAll(".desk,.fix,.marquee"),function(e){ e.remove(); });
   room.className="room "+(mode==="arrange"?"arrange":"seatmode")+($("snap").checked&&mode==="arrange"?" grid":"");
   var showNames=$("showNames").checked, upright=$("upright").checked, cols=$("colours").checked;
+  var genderOn=$("genderColours").checked;
 
   fixtures.forEach(function(f){
     var d=disp(f), el=document.createElement("div");
@@ -847,9 +912,15 @@ function render(){
     el.className="desk"+(st?"":" empty"); el.dataset.id=dk.id;
     place(el,d,w,h);
     el.style.fontSize=fontFor(h);
-    if(cols && st){
-      el.style.background=GROUP_COLS[dk.group%GROUP_COLS.length];
+    /* group/pair shows as a thick coloured outline; boy/girl (when known) fills the desk —
+       the two combine so a teacher can read both groupings on the same plan */
+    if(st && genderOn){
+      el.style.background = st.gender==="M" ? "#dbeafe" : st.gender==="F" ? "#fde3ec" : "#eef1f4";
+      el.style.webkitPrintColorAdjust="exact"; el.style.printColorAdjust="exact";
+    }
+    if(st && cols){
       el.style.borderColor=GROUP_BRD[dk.group%GROUP_BRD.length];
+      el.style.borderWidth=Math.max(1.25,h*0.0225)+"px";
       el.style.webkitPrintColorAdjust="exact"; el.style.printColorAdjust="exact";
     }
     var inner=document.createElement("div");
@@ -870,6 +941,23 @@ function render(){
     }
     el.appendChild(inner);
     var chair=document.createElement("div"); chair.className="chair"; el.appendChild(chair);
+    if(st && genderOn && mode==="seat"){
+      var tag=document.createElement("div");
+      tag.className="gtag "+(st.gender==="M"?"boy":st.gender==="F"?"girl":"unset");
+      tag.textContent = st.gender==="M" ? "♂" : st.gender==="F" ? "♀" : "?";
+      tag.title = "Click to set this student's gender (currently "+
+                  (st.gender==="M"?"boy":st.gender==="F"?"girl":"not set")+")";
+      (function(student){
+        tag.addEventListener("click",function(ev){
+          ev.stopPropagation();
+          act(function(){
+            student.gender = student.gender==="M" ? "F" : student.gender==="F" ? undefined : "M";
+          });
+          render();
+        });
+      })(st);
+      el.appendChild(tag);
+    }
     if(sel.indexOf(dk.id)>=0) el.classList.add("sel");
     if(mode==="seat" && swapPick===dk.id) el.classList.add("pick");
     if(mode==="seat" && st) el.draggable=true;
@@ -1148,6 +1236,7 @@ function renderCanvas(scale){
   g.strokeStyle="#c9d1d9"; g.lineWidth=1.5; g.strokeRect(1,1,RW-2,RH-2);
 
   var showNames=$("showNames").checked, upright=$("upright").checked, cols=$("colours").checked;
+  var genderOn=$("genderColours").checked;
 
   fixtures.forEach(function(f){
     var d=disp(f);
@@ -1169,12 +1258,20 @@ function renderCanvas(scale){
     var d=disp(dk), s=dk.studentId?studentById(dk.studentId):null;
     var w=snapSize(dk.w*deskScale), h=snapSize(dk.h*deskScale);
     g.save(); g.translate(d.x,d.y); g.rotate(d.rot*Math.PI/180);
-    g.fillStyle=s?(cols?GROUP_COLS[dk.group%GROUP_COLS.length]:"#ffffff"):"#f7f8fa";
-    g.strokeStyle=s?(cols?GROUP_BRD[dk.group%GROUP_BRD.length]:"#c3ccd6"):"#d3d9df";
-    g.lineWidth=1.5;
+    var fillC = !s ? "#f7f8fa" : genderOn ? (s.gender==="M"?"#dbeafe":s.gender==="F"?"#fde3ec":"#eef1f4") : "#ffffff";
+    var strokeC = !s ? "#d3d9df" : (cols ? GROUP_BRD[dk.group%GROUP_BRD.length] : "#c3ccd6");
+    g.fillStyle=fillC; g.strokeStyle=strokeC;
+    g.lineWidth = (s && cols) ? Math.max(1.25,h*0.0225) : 1.5;
     roundRect(g,-w/2,-h/2,w,h,5); g.fill();
     if(!s) g.setLineDash([4,3]);
     g.stroke(); g.setLineDash([]);
+    if(s && genderOn){
+      g.fillStyle = s.gender==="M" ? "#4a86c8" : s.gender==="F" ? "#d5709a" : "#aab3bd";
+      g.beginPath(); g.arc(-w/2+h*0.14,h/2-h*0.14,h*0.12,0,Math.PI*2); g.fill();
+      g.fillStyle="#fff"; g.font="700 "+(h*0.14)+"px Helvetica, Arial, sans-serif";
+      g.textAlign="center"; g.textBaseline="middle";
+      g.fillText(s.gender==="M"?"♂":s.gender==="F"?"♀":"?", -w/2+h*0.14, h/2-h*0.13);
+    }
     g.fillStyle="#b9c4d0"; g.fillRect(-w*0.26,h/2-h*0.10,w*0.52,h*0.065);
     if(upright) g.rotate(-d.rot*Math.PI/180);
     g.textAlign="center"; g.textBaseline="middle";
@@ -1448,7 +1545,7 @@ $("deskSize").addEventListener("input",function(){
   var v=this.value;
   actBurst("deskSize",function(){ deskScale=v/100; render(); },700);
 });
-["mirror","classroom","showNames","upright","colours","snap"].forEach(function(id){
+["mirror","classroom","showNames","upright","colours","snap","genderColours"].forEach(function(id){
   $(id).addEventListener("change",render);
 });
 $("nameSize").addEventListener("input",render);
@@ -1488,14 +1585,15 @@ function saveState(){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(function(){
     try{
-      var st={v:12,at:Date.now(),title:$("className").value,
+      var st={v:13,at:Date.now(),title:$("className").value,
         students:students,desks:desks,fixtures:fixtures,deskScale:deskScale,
         f:{numStudents:$("numStudents").value,groupSize:$("groupSize").value,
            perRow:$("perRow").value,startNo:$("startNo").value,
            seatStyle:$("seatStyle").value,names:$("names").value,
            nameSize:$("nameSize").value,rowCols:$("rowCols").value},
         c:{snap:$("snap").checked,mirror:$("mirror").checked,showNames:$("showNames").checked,
-           upright:$("upright").checked,colours:$("colours").checked,classroom:$("classroom").value}};
+           upright:$("upright").checked,colours:$("colours").checked,classroom:$("classroom").value,
+           genderColours:$("genderColours").checked}};
       localStorage.setItem(LSKEY,JSON.stringify(st));
       stamp(st.at);
     }catch(err){
@@ -1515,7 +1613,7 @@ function loadState(){
       if(st.f[k]!==undefined) $(k).value=st.f[k]; });
     if(st.f && st.f.rowCols) rowColsUserSet=true;
     updateRowColsUI($("seatStyle").value);
-    if(st.c) ["snap","mirror","showNames","upright","colours"].forEach(function(k){
+    if(st.c) ["snap","mirror","showNames","upright","colours","genderColours"].forEach(function(k){
       if(st.c[k]!==undefined) $(k).checked=st.c[k]; });
     $("classroom").value=(st.c && st.c.classroom==="B") ? "B" : "A";
     if(!(st.v>=6)){                       /* plans saved before v5: adopt the new defaults */
